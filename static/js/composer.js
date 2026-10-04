@@ -22,6 +22,7 @@ input.addEventListener('input', function(){
       else localStorage.removeItem(draftKey(S.current));
     } catch (e){}
   }
+  inlineCheck();
   var now = Date.now();
   if (S.current != null && input.value && now - S.typingSent > 4000){
     S.typingSent = now;
@@ -29,6 +30,25 @@ input.addEventListener('input', function(){
   }
 });
 input.addEventListener('keydown', function(e){
+  if (e.key === 'Escape' && !$('#inlineDrop').hidden){ inlineClose(); return; }
+  if (!$('#inlineDrop').hidden){
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault();
+      var n = inl.results.length;
+      if (n){
+        inl.sel = e.key === 'ArrowDown'
+          ? (inl.sel + 1) % n
+          : (inl.sel <= 0 ? n - 1 : inl.sel - 1);
+        inlineRender(true);
+      }
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey){
+      e.preventDefault();
+      sendInline(inl.sel < 0 ? 0 : inl.sel);
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); }
 });
 $('#btnSend').addEventListener('click', doSend);
@@ -57,6 +77,7 @@ function clearEditing(){ S.editing = null; $('#editBar').hidden = true; }
 $('#editCancel').addEventListener('click', function(){ clearEditing(); input.value = ''; autoresize(); });
 function doSend(){
   if (S.current == null) return;
+  if (suppressNextSend){ suppressNextSend = false; return; }
   var text = input.value.trim();
   if (S.pendingFile){ doUpload(text); return; }
   if (!text) return;
@@ -75,6 +96,7 @@ function doSend(){
   try { if (S.current != null) localStorage.removeItem(draftKey(S.current)); } catch (e) {}
   api('api/send', {method: 'POST', body: {chat_id: S.current, text: text, reply_to: replyTo}})
     .then(function(r){
+      playSound('send');
       if (r.message && S.msgById[r.message.id] === undefined){
         S.msgs.push(r.message);
         S.msgById[r.message.id] = r.message;
@@ -264,3 +286,151 @@ $('#btnMic').addEventListener('click', function(){
 });
 $('#recCancel').addEventListener('click', function(){ recStop(false); });
 $('#recSend').addEventListener('click', function(){ recStop(true); });
+
+/* ============================== inline @bot queries ============================== */
+var inl = {timer: null, token: null, results: [], sel: -1, bot: ''};
+function inlineClose(){
+  clearTimeout(inl.timer);
+  inl.token = null; inl.results = []; inl.sel = -1;
+  var box = $('#inlineDrop');
+  if (box){ box.hidden = true; box.innerHTML = ''; }
+}
+function inlineCheck(){
+  if (S.current == null){ inlineClose(); return; }
+  var mm = input.value.match(/^@([a-zA-Z0-9_]{3,32})(?:\s+([\s\S]*))?$/);
+  if (!mm || mm[1] === 'gif'){ inlineClose(); return; }
+  var bot = mm[1], q = mm[2] || '';
+  clearTimeout(inl.timer);
+  inl.timer = setTimeout(function(){
+    api('api/inline_query?chat_id=' + S.current + '&bot=' + encodeURIComponent(bot) +
+        '&q=' + encodeURIComponent(q))
+      .then(function(r){
+        if (!r || !r.results || !r.results.length){ inlineClose(); return; }
+        inl.token = r.token; inl.results = r.results; inl.bot = bot; inl.sel = -1;
+        inlineRender();
+      })
+      .catch(function(){ inlineClose(); });
+  }, 400);
+}
+function inlineRender(keepSel){
+  var box = $('#inlineDrop');
+  if (!box) return;
+  if (!keepSel) inl.sel = -1;
+  box.innerHTML = inl.results.map(function(r, i){
+    return '<div class="il-item' + (i === inl.sel ? ' on' : '') + '" data-ii="' + i + '">' +
+      (r.has_thumb
+        ? '<img class="il-thumb" loading="lazy" src="api/inline_media/' + inl.token + '/' + r.i + '">'
+        : '<span class="il-ico">🤖</span>') +
+      '<div class="il-body"><div class="il-t">' + esc(r.title) + '</div>' +
+      (r.description ? '<div class="il-d">' + esc(r.description) + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+  box.hidden = false;
+}
+function sendInline(i){
+  var r = inl.results[i];
+  if (!r || !inl.token) return;
+  api('api/send_inline', {method: 'POST', body: {
+    chat_id: S.current, token: inl.token, result_id: r.id
+  }}).then(function(){
+    input.value = '';
+    autoresize();
+    try { localStorage.removeItem(draftKey(S.current)); } catch (e) {}
+    inlineClose();
+    playSound('send');
+  }).catch(function(e){ toastErr(e); });
+}
+$('#inlineDrop').addEventListener('mousedown', function(e){
+  var it = e.target.closest('.il-item');
+  if (!it) return;
+  e.preventDefault();
+  sendInline(Number(it.dataset.ii));
+});
+
+/* ============================== scheduled messages ============================== */
+var schedHoldTimer = null;
+function schedHoldStart(){
+  clearTimeout(schedHoldTimer);
+  schedHoldTimer = setTimeout(function(){
+    schedHoldTimer = null;
+    suppressNextSend = true;
+    openScheduleModal();
+  }, 550);
+}
+function schedHoldEnd(){
+  if (schedHoldTimer){ clearTimeout(schedHoldTimer); schedHoldTimer = null; }
+}
+var suppressNextSend = false;
+$('#btnSend').addEventListener('pointerdown', schedHoldStart);
+$('#btnSend').addEventListener('pointerup', schedHoldEnd);
+$('#btnSend').addEventListener('pointerleave', schedHoldEnd);
+$('#btnSend').addEventListener('contextmenu', function(e){
+  e.preventDefault();
+  openScheduleModal();
+});
+
+function _schedDTLocal(ts){
+  var d = new Date(ts);
+  var p = function(x){ return (x < 10 ? '0' : '') + x; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function openScheduleModal(prefill){
+  if (S.current == null) return;
+  var soon = Date.now() + 3600 * 1000;
+  openModal('<div class="mhead"><b>Schedule message</b>' +
+    '<button class="icon-btn" id="scClose"><svg class="ic"><use href="#i-close"/></svg></button></div>' +
+    '<div class="sc-body">' +
+      '<textarea id="scText" placeholder="Message" rows="3"></textarea>' +
+      '<label class="sc-l">Send at<input type="datetime-local" id="scWhen" min="' + _schedDTLocal(Date.now() + 60000) + '" value="' + _schedDTLocal(soon) + '"></label>' +
+      '<button class="btn primary" id="scGo">Schedule</button>' +
+    '</div>');
+  $('#scClose').onclick = closeModal;
+  if (prefill) $('#scText').value = prefill;
+  setTimeout(function(){ $('#scText').focus(); }, 50);
+  $('#scGo').onclick = function(){
+    var text = $('#scText').value.trim();
+    var when = new Date($('#scWhen').value).getTime();
+    if (!text){ toast('Write a message first'); return; }
+    if (!when || isNaN(when) || when <= Date.now()){ toast('Pick a future time'); return; }
+    var btn = this;
+    busy(btn, true, 'Scheduling…');
+    api('api/schedule', {method: 'POST', body: {
+      chat_id: S.current, text: text, schedule_date: Math.floor(when / 1000)
+    }}).then(function(){
+      closeModal();
+      toast('Message scheduled');
+      if (input.value === text){
+        input.value = ''; autoresize();
+        try { localStorage.removeItem(draftKey(S.current)); } catch (e) {}
+      }
+    }).catch(function(e){ busy(btn, false); toastErr(e); });
+  };
+}
+
+function viewScheduled(){
+  if (S.current == null) return;
+  openModal('<div class="mhead"><b>Scheduled messages</b>' +
+    '<button class="icon-btn" id="svClose"><svg class="ic"><use href="#i-close"/></svg></button></div>' +
+    '<div class="mbody" id="svList"><div class="spinner"></div></div>' +
+    '<div style="padding:10px 12px"><button class="btn primary" id="svNew" style="width:100%">Schedule a new message</button></div>', true);
+  $('#svClose').onclick = closeModal;
+  $('#svNew').onclick = function(){ openScheduleModal(); };
+  api('api/scheduled?chat_id=' + S.current).then(function(r){
+    var list = r.messages || [];
+    $('#svList').innerHTML = list.length ? list.map(function(m){
+      return '<div class="sch-row"><div class="sch-body">' +
+        '<div class="sch-time">🕘 ' + esc(new Date(m.date).toLocaleString()) + '</div>' +
+        '<div class="sch-text">' + (m.html || esc(m.raw || '')) + '</div></div>' +
+        '<button class="icon-btn" data-sdel="' + m.id + '" title="Delete">🗑</button></div>';
+    }).join('') : '<div class="empty-list">No scheduled messages here</div>';
+    $('#svList').onclick = function(e){
+      var b = e.target.closest('[data-sdel]');
+      if (!b) return;
+      api('api/scheduled/delete', {method: 'POST', body: {chat_id: S.current, msg_id: Number(b.dataset.sdel)}})
+        .then(function(){ toast('Deleted'); viewScheduled(); })
+        .catch(toastErr);
+    };
+  }).catch(toastErr);
+}

@@ -34,10 +34,15 @@ function enterApp(me){
   S.me = me || S.me;
   showScreen('app');
   loadDialogs(false);
+  loadStoriesBar();
   if (S.dlgTimer) clearInterval(S.dlgTimer);
   S.dlgTimer = setInterval(function(){
     if (!document.hidden) loadDialogs(true);
   }, 30000);
+  if (S.storyTimer) clearInterval(S.storyTimer);
+  S.storyTimer = setInterval(function(){
+    if (!document.hidden) loadStoriesBar();
+  }, 300000);
   document.addEventListener('visibilitychange', function(){
     if (!document.hidden){
       if (S.current != null) pollMessages();

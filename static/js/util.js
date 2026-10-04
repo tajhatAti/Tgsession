@@ -122,3 +122,31 @@ function api(path, opts){
 }
 
 /* ============================== screens ============================== */
+
+
+/* ============================== sounds (tiny WebAudio blips) ============================== */
+var sndCtx = null;
+function playSound(kind){
+  try {
+    if (localStorage.getItem('tgw_sound') === '0') return;
+  } catch (e) {}
+  try {
+    if (!sndCtx) sndCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (sndCtx.state === 'suspended') sndCtx.resume();
+    var t = sndCtx.currentTime;
+    var o = sndCtx.createOscillator();
+    var g = sndCtx.createGain();
+    o.connect(g); g.connect(sndCtx.destination);
+    if (kind === 'send'){
+      o.type = 'sine'; o.frequency.setValueAtTime(660, t);
+      o.frequency.exponentialRampToValueAtTime(990, t + 0.09);
+      g.gain.setValueAtTime(0.06, t);
+    } else {
+      o.type = 'sine'; o.frequency.setValueAtTime(440, t);
+      o.frequency.exponentialRampToValueAtTime(587, t + 0.12);
+      g.gain.setValueAtTime(0.05, t);
+    }
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.start(t); o.stop(t + 0.24);
+  } catch (e) {}
+}

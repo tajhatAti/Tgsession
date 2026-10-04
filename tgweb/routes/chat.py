@@ -93,7 +93,15 @@ async def api_messages(chat_id: int, offset_id: int = 0, limit: int = Query(50, 
         raise HTTPException(400, "Telegram error: %s" % e)
     data = await serialize_messages(client, entity, msgs, chat_id)
     info = await peer_dialog_info(client, entity)
-    return {"messages": data, "typing": typing_names(chat_id), **(info or {})}
+    pinned = None
+    try:
+        pm = await client.get_messages(entity, limit=1, filter=types.InputMessagesFilterPinned)
+        pm = listify(pm)
+        if pm and pm[0] is not None:
+            pinned = {"id": int(pm[0].id), "raw": (pm[0].message or "")[:80] or "📎 Pinned media"}
+    except Exception as e:
+        log.warning("pinned lookup failed: %s", e)
+    return {"messages": data, "typing": typing_names(chat_id), "pinned": pinned, **(info or {})}
 
 
 @router.get("/search")

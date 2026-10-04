@@ -47,6 +47,8 @@ try{var t=localStorage.getItem('tgw_theme');if(t==='light'||t==='dark'){document
 <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
 <symbol id="i-checks" viewBox="0 0 24 24"><path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.5 12.01l-1.41 1.41 5.57 5.58 9.99-9.99-1.41-1.42zM.41 13.41L6 19l1.41-1.42L1.83 12 .41 13.41z"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8v2zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/></symbol>
 <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></symbol>
 <symbol id="i-music" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></symbol>
 <symbol id="i-archive" viewBox="0 0 24 24"><path d="M20.54 5.23l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z"/></symbol>
@@ -119,9 +121,11 @@ print(c.session.save())   # &lt;- copy this string
 <!-- ======== main app ======== -->
 <section id="scr-app" class="screen" hidden>
   <aside id="side">
+    <div id="storiesBar" class="storybar" hidden></div>
     <header class="side-head">
       <button id="btnMenu" class="icon-btn" title="Menu"><svg class="ic"><use href="#i-menu"/></svg></button>
       <input id="dlgSearch" type="search" placeholder="Search chats" autocomplete="off">
+      <button id="btnNew" class="icon-btn" title="New chat / join by username"><svg class="ic"><use href="#i-edit"/></svg></button>
     </header>
     <div id="gsearch" hidden></div>
     <nav id="tabs">
@@ -159,6 +163,7 @@ print(c.session.save())   # &lt;- copy this string
         </div>
         <div id="csearchResults" style="max-height:40vh;overflow-y:auto;padding:0 8px 8px"></div>
       </div>
+      <div id="pinBar" hidden><svg class="ic"><use href="#i-pin"/></svg><span class="pin-text" id="pinText">Pinned message</span><button class="icon-btn pin-close" id="pinClose" title="Unpin">✕</button></div>
       <div id="msgs"></div>
       <button id="scrollDown" hidden><svg class="ic"><use href="#i-down"/></svg><span class="mini" id="sdBadge" hidden></span></button>
       <div id="selBar" hidden>
@@ -179,7 +184,8 @@ print(c.session.save())   # &lt;- copy this string
         <span id="attachIcon">📎</span><span id="attachName"></span>
         <button id="attachCancel" class="icon-btn"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
-      <div id="botKb" hidden></div>
+      <div id="inlineDrop" hidden></div>
+<div id="botKb" hidden></div>
 <div id="recBar" hidden>
   <span class="rec-dot"></span>
   <span class="rec-time" id="recTime">0:00</span>
@@ -210,6 +216,8 @@ print(c.session.save())   # &lt;- copy this string
 <script src="js/menus.js"></script>
 <script src="js/modals.js"></script>
 <script src="js/viewer.js"></script>
+<script src="js/vendor/lottie.min.js"></script>
+<script src="js/stories.js"></script>
 <script src="js/emoji.js"></script>
 <script src="js/profile.js"></script>
 <script src="js/app.js"></script>
