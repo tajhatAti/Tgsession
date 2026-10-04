@@ -1,10 +1,10 @@
 # TgWeb — নিজের Telegram Web Client (Telegram-এর কপি ভার্সন)
 
 একজন ইউজারের জন্য, নিজের সার্ভারে হোস্ট করা, বিজ্ঞাপনমুক্ত Telegram ওয়েব ক্লায়েন্ট।
-**লগইন শুধুমাত্র Telethon StringSession দিয়ে** — ফোন/OTP দিয়ে নয়।
+**লগইন দুই ভাবে:** ফোন নম্বর + OTP + 2FA পাসওয়ার্ড (ডিফল্ট), অথবা Telethon StringSession পেস্ট করে।
 
 A self-hosted, single-user, ad-free Telegram web client.
-**Login works only by pasting a Telethon StringSession.**
+**Login two ways:** phone number + OTP + 2FA password (default), or by pasting a Telethon StringSession.
 
 ---
 
@@ -20,8 +20,12 @@ Start: `python main.py` — ব্যস। `PORT` environment variable সা�
 
 ## 🔑 প্রথম লগইন
 
+**পদ্ধতি ১ — ফোন নম্বর (ডিফল্ট):**
 1. ওয়েবসাইট খুলুন → সাইট পাসওয়ার্ড দিন (`tgweb/config.py`-এর `PASSWORD`)
-2. নিজের কম্পিউটারে একবার এই কোড চালিয়ে session string বানান:
+2. **Phone number** ট্যাবে ফোন নম্বর দিন (দেশের কোড সহ, যেমন `+8801XXXXXXXXX`)
+3. Telegram অ্যাপে যে কোড আসবে সেটি দিন; 2FA চালু থাকলে পাসওয়ার্ডও দিন — ব্যস!
+
+**পদ্ধতি ২ — StringSession:** নিজের কম্পিউটারে একবার এই কোড চালিয়ে session string বানান:
 
 ```bash
 pip install telethon
@@ -121,24 +125,34 @@ path-prefix (`/live/slug/`) এর নিচে ভেঙে যাবে।
 
 ## ✨ ফিচার
 
-- ডায়ালগ লিস্ট: ট্যাব (All/Chats/Groups/Channels/Bots/Saved), সার্চ, অ্যাভাটার,
-  unread badge, pinned আগে, last-message preview, relative time
-- চ্যাট: উপরে infinite scroll, ~8s পোলিং, reply (quote সহ), forward (chat picker),
-  edit/delete, mark-as-read বাটন, in-chat search, Telegram formatting
-  (bold/italic/link/code/spoiler), emoji reactions, pin, mute, archive
-- মিডিয়া: ছবি (thumb → ফুল), ভিডিও **HTTP Range সাপোর্ট (seek কাজ করে)**,
+- **লগইন**: ফোন নম্বর + OTP + 2FA পাসওয়ার্ড (ডিফল্ট ট্যাব), অথবা StringSession
+- ডায়ালগ লিস্ট: ট্যাব (All/Chats/Groups/Channels/Bots/Saved), সার্চ + **গ্লোবাল সার্চ
+  (ড্রপডাউনে চ্যাট+মেসেজ)**, অ্যাভাটার, unread badge, pinned আগে, last-message preview,
+  relative time, **Draft: … ইন্ডিকেটর**
+- চ্যাট: উপরে infinite scroll, ~8s পোলিং, reply (quote সহ), forward (chat picker +
+  **"Hide sender names" অপশন**), edit/delete, mark-as-read বাটন, in-chat search,
+  Telegram formatting (bold/italic/link/code/spoiler), emoji reactions, pin, mute, archive
+- **প্রোফাইল**: চ্যাটের নামে ক্লিক করলে ইউজার/গ্রুপ/চ্যানেল info মোডাল (bio, username,
+  ফোন, কমন গ্রুপ, মেম্বার, mute) — মেনু থেকে নিজের প্রোফাইল + **Settings (নাম/বায়ো এডিট)**
+- **বট**: ইনলাইন বাটন (callback + URL + copy + switch), বট রিপ্লাই কীবোর্ড
+- মিডিয়া: ছবি (thumb → ফুল), **অ্যালবাম (grouped ছবি এক বাবলে গ্রিডে, পুরো অ্যালবাম
+  একসাথে সিলেক্ট/ফরওয়ার্ড/ডিলিট)**, ভিডিও **HTTP Range সাপোর্ট (seek কাজ করে)**,
   অডিও/ভয়েস প্লেয়ার, ফাইল ডাউনলোড (নাম+সাইজ), মিডিয়া গ্যালারি (media/files/voice/links),
-  ফাইল আপলোড, ওয়েবপেজ preview, পোল
+  ফাইল আপলোড (**2GB পর্যন্ত**), **ভয়েস মেসেজ রেকর্ড (মাইক বাটন)**, ওয়েবপেজ preview, পোল
+- **স্টিকার**: বড় (168px) ট্রান্সপারেন্ট বাবলে রেন্ডার
+- **ইমোজি পিকার**: ১০ ক্যাটাগরি + সাম্প্রতিক (localStorage), কার্সরের জায়গায় বসে
+- **ড্রাফট**: লেখা অসমাপ্ত রাখলে সেভ থাকে, লিস্টে "Draft:" দেখায়, পাঠালে মুছে যায়
 - অন্যান্য: Saved Messages, মেম্বার লিস্ট, light/dark থিম (localStorage), টাইপিং
   ইন্ডিকেটর, unread divider, jump-to-reply, scroll-to-bottom বাটন, কীবোর্ড শর্টকাট
-  (Esc, Ctrl+K, Ctrl+F), মোবাইল responsive, PWA manifest, লগআউট
+  (Esc, Ctrl+K, Ctrl+F), মোবাইল responsive (**scroll hardening — iOS
+  -webkit-overflow-scrolling:touch, overscroll-behavior:contain**), PWA manifest, লগআউট
 
 ## 🛠️ ডেভেলপার টেস্ট
 
 ```bash
 python -m pyflakes tgweb/*.py tgweb/routes/*.py   # Python lint
 python3 tools/check_js.py                          # JS syntax (node --check)
-python tests/smoke.py                              # ৯৯টি API টেস্ট (fake Telegram)
+python tests/smoke.py                              # ১১৮টি API টেস্ট (fake Telegram)
 ```
 
 ## ⚠️ নোট
