@@ -95,6 +95,7 @@ $('#btnChatMenu').addEventListener('click', function(e){
   var r = this.getBoundingClientRect();
   var d = S.dlg || {};
   openMenu([
+    {icon: 'i-user', label: 'Chat info', fn: function(){ if (S.current != null) openProfile(S.current); }},
     {icon: d.muted ? 'i-bell' : 'i-bell-off', label: d.muted ? 'Unmute' : 'Mute', fn: toggleMute},
     {icon: d.archived ? 'i-unarchive' : 'i-archive', label: d.archived ? 'Unarchive' : 'Archive', fn: toggleArchive},
     {sep: true},
@@ -125,7 +126,9 @@ $('#btnMenu').addEventListener('click', function(e){
   var r = this.getBoundingClientRect();
   var dark = document.documentElement.getAttribute('data-theme') !== 'light';
   openMenu([
+    {icon: 'i-user', label: 'My profile', fn: function(){ openProfile(S.me ? S.me.id : null); }},
     {icon: 'i-saved', label: 'Saved Messages', fn: openSaved},
+    {icon: 'i-gear', label: 'Settings', fn: openSettings},
     {icon: dark ? 'i-sun' : 'i-moon', label: dark ? 'Light theme' : 'Dark theme', fn: toggleTheme},
     {sep: true},
     {icon: 'i-lock', label: 'Lock site', fn: lockSite},
@@ -187,7 +190,7 @@ $('#msgs').addEventListener('click', function(e){
     return;
   }
   var view = el.closest('[data-act="view"]');
-  if (view && msgRow){ openViewer(Number(msgRow.dataset.id), view.dataset.kind); return; }
+  if (view && msgRow){ openViewer(Number(view.dataset.mid || msgRow.dataset.id), view.dataset.kind); return; }
   var act = el.closest('.abtn');
   if (act && msgRow){
     var m2 = S.msgById[msgRow.dataset.id];

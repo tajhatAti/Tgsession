@@ -60,7 +60,62 @@ $('#siteForm').addEventListener('submit', function(e){
     .finally(function(){ busy(btn, false); });
 });
 
-/* ============================== telegram login (session string — the only method) ============================== */
+/* ============================== telegram login: phone (default) or session string ============================== */
+$('#tabPhone').addEventListener('click', function(){
+  $('#tabPhone').classList.add('on'); $('#tabSession').classList.remove('on');
+  $('#panePhone').hidden = false; $('#paneSession').hidden = true; tgErr(null);
+  setTimeout(function(){ $('#tgPhone').focus(); }, 30);
+});
+$('#tabSession').addEventListener('click', function(){
+  $('#tabSession').classList.add('on'); $('#tabPhone').classList.remove('on');
+  $('#paneSession').hidden = false; $('#panePhone').hidden = true; tgErr(null);
+  setTimeout(function(){ $('#tgSession').focus(); }, 30);
+});
+$('#tgSendCode').addEventListener('click', function(){
+  var phone = $('#tgPhone').value.trim();
+  if (!phone){ tgErr('Enter your phone number with country code.'); return; }
+  var btn = this; busy(btn, true, 'Sending…');
+  api('api/tg/login_phone', {method:'POST', body:{phone: phone}})
+    .then(function(){
+      tgErr(null);
+      $('#tgCodeRow').hidden = false;
+      $('#tgCode').focus();
+    })
+    .catch(function(e){ tgErr(e.detail); })
+    .finally(function(){ busy(btn, false); });
+});
+$('#tgVerifyCode').addEventListener('click', function(){
+  var code = $('#tgCode').value.trim();
+  if (!code){ tgErr('Enter the login code.'); return; }
+  var btn = this; busy(btn, true, 'Checking…');
+  api('api/tg/login_code', {method:'POST', body:{code: code}})
+    .then(function(r){
+      if (r.need_password){
+        tgErr(null);
+        $('#tg2faRow').hidden = false;
+        $('#tg2fa').focus();
+      } else { enterApp(r.me); }
+    })
+    .catch(function(e){ tgErr(e.detail); })
+    .finally(function(){ busy(btn, false); });
+});
+$('#tgVerifyPass').addEventListener('click', function(){
+  var btn = this; busy(btn, true, 'Checking…');
+  api('api/tg/login_password', {method:'POST', body:{password: $('#tg2fa').value}})
+    .then(function(r){ enterApp(r.me); })
+    .catch(function(e){ tgErr(e.detail); })
+    .finally(function(){ busy(btn, false); });
+});
+$('#tgPhone').addEventListener('keydown', function(e){
+  if (e.key === 'Enter'){ e.preventDefault(); $('#tgSendCode').click(); }
+});
+$('#tgCode').addEventListener('keydown', function(e){
+  if (e.key === 'Enter'){ e.preventDefault(); $('#tgVerifyCode').click(); }
+});
+$('#tg2fa').addEventListener('keydown', function(e){
+  if (e.key === 'Enter'){ e.preventDefault(); $('#tgVerifyPass').click(); }
+});
+
 function doImportSession(){
   var s = $('#tgSession').value.trim();
   if (!s){ tgErr('Paste the session string first.'); return; }

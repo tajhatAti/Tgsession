@@ -9,10 +9,16 @@ from telethon import TelegramClient
 from telethon import errors as tg_errors
 from telethon.sessions import StringSession
 
+import re
+
 from ..config import API_HASH, API_ID, AUTH_COOKIE, AUTH_KEY, AUTH_TTL, PASSWORD, log
-from ..schemas import PasswordBody, SessionBody
+from ..schemas import (CodeBody, PasswordBody, PhoneBody, ProfileEditBody,
+                       SessionBody)
+from telethon import functions
+
 from ..security import cookie_ok, make_cookie_value, require_site, secure_cookie
-from ..tgstate import _remove_session_file, _safe_disconnect, state
+from ..serialize import display_name
+from ..tgstate import _remove_session_file, _safe_disconnect, require_client, state
 
 # unauthenticated endpoints (site login itself + health check)
 public = APIRouter()
@@ -50,6 +56,68 @@ async def api_site_logout(request: Request):
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(AUTH_COOKIE, path="/")
     return resp
+
+@router.post("/tg/login_phone")
+async def tg_login_phone(body: PhoneBody):
+    phone = (body.phone or "").strip()
+    if not phone:
+        raise HTTPException(400, "Enter a phone number with country code, e.g. +8801XXXXXXXXX")
+    if state.authorized:
+        raise HTTPException(409, "Already logged in — log out first")
+    async with state.lock:
+        await state.reset()
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        state.client = client
+        try:
+            await client.connect()
+            result = await client.send_code_request(phone)
+        except tg_errors.ApiIdInvalidError:
+            raise HTTPException(400, "API_ID / API_HASH is invalid — check the constants at the top of main.py")
+        except tg_errors.FloodWaitError as e:
+            raise HTTPException(429, "Telegram says: wait %ss before retrying" % e.seconds,
+                                headers={"Retry-After": str(e.seconds)})
+        except tg_errors.RPCError as e:
+            raise HTTPException(400, "Telegram error: %s" % e)
+        state.phone = phone
+        state.phone_code_hash = result.phone_code_hash
+        return {"ok": True, "phone": phone}
+
+
+@router.post("/tg/login_code")
+async def tg_login_code(body: CodeBody):
+    client = state.client
+    if client is None or not state.phone:
+        raise HTTPException(409, "Request a login code first")
+    code = re.sub(r"[^\d]", "", body.code or "")
+    try:
+        me = await client.sign_in(phone=state.phone, code=code, phone_code_hash=state.phone_code_hash)
+    except tg_errors.SessionPasswordNeededError:
+        return {"ok": False, "need_password": True}
+    except (tg_errors.PhoneCodeInvalidError, tg_errors.PhoneCodeEmptyError):
+        raise HTTPException(400, "That code is not valid")
+    except tg_errors.PhoneCodeExpiredError:
+        raise HTTPException(400, "The code has expired — request a new one")
+    except tg_errors.PhoneNumberUnoccupiedError:
+        raise HTTPException(400, "This number is not registered on Telegram")
+    state.finish_login(client, me)
+    return {"ok": True, "me": state.me}
+
+
+@router.post("/tg/login_password")
+async def tg_login_password(body: PasswordBody):
+    client = state.client
+    if client is None:
+        raise HTTPException(409, "Request a login code first")
+    try:
+        me = await client.sign_in(password=body.password or "")
+    except tg_errors.PasswordHashInvalidError:
+        raise HTTPException(400, "Wrong two-factor password")
+    except tg_errors.FloodWaitError as e:
+        raise HTTPException(429, "Telegram says: wait %ss before retrying" % e.seconds,
+                            headers={"Retry-After": str(e.seconds)})
+    state.finish_login(client, me)
+    return {"ok": True, "me": state.me}
+
 
 @router.post("/tg/import_session")
 async def tg_import_session(body: SessionBody):
@@ -105,3 +173,24 @@ async def tg_logout():
             await _safe_disconnect(client)
     _remove_session_file()
     return {"ok": True, "logged_out": bool(ok)}
+
+
+# ---- edit own profile (Settings) -------------------------------------------
+@router.post("/tg/me/edit")
+async def api_me_edit(body: ProfileEditBody):
+    client = await require_client()
+    try:
+        me = await client(functions.account.UpdateProfileRequest(
+            first_name=(body.first_name if body.first_name is not None else None),
+            last_name=(body.last_name if body.last_name is not None else None),
+            about=(body.about if body.about is not None else None)))
+    except tg_errors.RPCError as e:
+        raise HTTPException(400, "Telegram error: %s" % e)
+    try:
+        if me is not None:
+            state.me = {"id": getattr(me, "id", None), "name": display_name(me),
+                        "username": getattr(me, "username", None)}
+            state.me_id = getattr(me, "id", None)
+    except Exception:
+        pass
+    return {"ok": True, "me": state.me}

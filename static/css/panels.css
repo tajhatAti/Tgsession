@@ -1,0 +1,100 @@
+/* TgWeb — panels.css: profile, settings, emoji picker, voice recorder,
+   inline bot buttons, reply keyboard, albums, stickers, global search */
+
+/* ---------- profile / settings modal ---------- */
+.profile-head{display:flex;flex-direction:column;align-items:center;padding:18px 14px 10px}
+.profile-head .pava .ava{width:84px;height:84px;font-size:30px}
+.pname{font-size:19px;font-weight:700;margin-top:10px;text-align:center;word-break:break-word}
+.pstatus{font-size:13.5px;color:var(--muted);margin-top:2px}
+.prows{padding:6px 14px}
+.prow{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);align-items:flex-start}
+.prow:last-child{border-bottom:0}
+.plabel{width:110px;flex:none;color:var(--muted);font-size:13.5px;padding-top:1px}
+.pval{flex:1;min-width:0;word-break:break-word;font-size:14.5px;display:flex;gap:6px;align-items:flex-start;justify-content:space-between}
+.pval .icon-btn.mini{width:26px;height:26px}
+.pacts{display:flex;gap:8px;flex-wrap:wrap;padding:4px 14px 16px}
+.stform{padding:4px 14px 12px;display:flex;flex-direction:column;gap:10px}
+.stform label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.stform input,.stform textarea{padding:9px 12px;border-radius:8px;border:1px solid var(--border);
+  background:var(--bg);outline:none;font:inherit;color:var(--fg)}
+.stform input:focus,.stform textarea:focus{border-color:var(--accent)}
+
+/* ---------- emoji picker ---------- */
+.emoji-picker{position:fixed;z-index:110;width:min(340px,92vw);background:var(--panel);
+  border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.emoji-picker .etabs{display:flex;gap:2px;padding:6px 8px 0;overflow-x:auto;scrollbar-width:none}
+.emoji-picker .etabs::-webkit-scrollbar{display:none}
+.emoji-picker .ecat{font-size:17px;padding:6px 8px;border-radius:8px;flex:none}
+.emoji-picker .ecat.on{background:var(--accent-soft)}
+.emoji-picker .egrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(36px,1fr));
+  max-height:230px;overflow-y:auto;padding:8px;gap:2px}
+.emoji-picker .eem{font-size:21px;padding:4px;border-radius:8px;line-height:1.3}
+.emoji-picker .eem:hover{background:var(--hover)}
+
+/* ---------- voice recording bar ---------- */
+#recBar{display:flex;gap:10px;align-items:center;background:var(--panel);border-top:1px solid var(--border);
+  padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#recBar .rec-dot{width:10px;height:10px;border-radius:50%;background:var(--danger);animation:recpulse 1.2s infinite}
+@keyframes recpulse{0%,100%{opacity:1}50%{opacity:.25}}
+#recBar .rec-time{font-variant-numeric:tabular-nums;font-weight:600;min-width:44px}
+#recBar .rec-hint{color:var(--muted);font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#recBar .icon-btn.rec-send{color:var(--accent)}
+
+/* ---------- inline bot buttons ---------- */
+.msg .ibtns{display:flex;flex-direction:column;gap:4px;margin-top:6px;min-width:200px}
+.msg .ibtns .irow{display:flex;gap:4px}
+.msg .ibtns .irow > *{flex:1}
+.msg .ibtns button.ibtn,.msg .ibtns a.ibtn{display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:8px 10px;border-radius:8px;background:var(--accent-soft);color:var(--accent);
+  font-weight:600;font-size:13.5px;text-align:center;text-decoration:none;min-width:0}
+.msg .ibtns .ibtn:hover{filter:brightness(.95)}
+.msg.out .ibtns .ibtn{background:var(--accent-soft);color:var(--accent)}
+
+/* ---------- bot reply keyboard ---------- */
+#botKb{background:var(--panel);border-top:1px solid var(--border);padding:6px 8px;
+  padding-bottom:max(6px,calc(env(safe-area-inset-bottom) - 4px));display:flex;flex-direction:column;gap:4px}
+#botKb .krow{display:flex;gap:4px}
+#botKb .krow button{flex:1;padding:10px 8px;border-radius:8px;background:var(--bg);
+  color:var(--accent);font-weight:600;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#botKb .krow button:hover{background:var(--hover)}
+
+/* ---------- albums (grouped media) ---------- */
+.msg .album{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-radius:12px;overflow:hidden;max-width:420px}
+.msg .album .photo img{width:100%;height:100%;object-fit:cover;display:block;aspect-ratio:1}
+.msg .album .photo:first-child:nth-last-child(1){grid-column:span 2}
+
+/* ---------- stickers ---------- */
+.msg .bub.stickerbub{background:transparent!important;border-color:transparent!important;box-shadow:none}
+.msg .sticker{width:168px;max-width:60vw;text-align:center}
+.msg .sticker img,.msg .sticker video{width:168px;max-width:60vw;height:auto;display:block;border-radius:12px}
+
+/* ---------- global search dropdown ---------- */
+#gsearch{position:absolute;top:54px;left:8px;right:8px;max-height:70vh;overflow-y:auto;z-index:60;
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+#gsearch .gs-head{padding:8px 12px 2px;font-size:12px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.4px}
+#gsearch .gs-item{display:flex;gap:10px;padding:8px 12px;cursor:pointer;align-items:center}
+#gsearch .gs-item:hover{background:var(--hover)}
+#gsearch .gs-body{min-width:0;flex:1}
+#gsearch .gs-t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#gsearch .gs-b{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#gsearch .gs-where{font-size:11.5px;color:var(--accent);flex:none;max-width:90px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- drafts ---------- */
+.dlg-last .draft{color:var(--danger);font-weight:600}
+
+/* ---------- scroll hardening (mobile) ---------- */
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+#msgs,.dlg-list,#modalBox,.egrid,#viewer,.mbody{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+
+/* ---------- login tabs (phone / session) ---------- */
+.tabs2{display:flex;gap:4px;background:var(--hover);border-radius:10px;padding:4px;margin:14px 0 12px}
+.tabs2 button{flex:1;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--muted);
+  font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+.tabs2 button.on{background:var(--panel);color:var(--fg);box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.auth-card #panePhone input,.auth-card #panePhone button,.auth-card #tgCodeRow input,
+.auth-card #tgCodeRow button,.auth-card #tg2faRow input,.auth-card #tg2faRow button{margin-top:8px;width:100%}
+.auth-card #paneSession textarea{margin-top:8px}
+#side{position:relative}
+#btnEmoji{font-size:20px;line-height:1}

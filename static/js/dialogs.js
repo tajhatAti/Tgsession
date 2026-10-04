@@ -35,9 +35,13 @@ function previewOf(m){
 function dialogRow(d){
   var last = d.last || {};
   var pre = '';
-  if (last.out) pre = 'You: ';
+  if (draft) pre = '';
+  else if (last.out) pre = 'You: ';
   else if (last.sender && (d.type === 'group') && last.snippet) pre = last.sender + ': ';
-  var snip = last.snippet ? esc(previewOfText(last.snippet)) : '&nbsp;';
+  var draft = '';
+  try { draft = (S.current !== d.id && localStorage.getItem('tgw_draft_' + d.id)) || ''; } catch (e) {}
+  var snip = draft ? '<span class="draft">Draft: </span>' + esc(draft.slice(0, 60)) :
+             (last.snippet ? esc(previewOfText(last.snippet)) : '&nbsp;');
   var badge = '';
   if (d.unread > 0) badge = '<span class="badge'+(d.muted?' gray':'')+'">'+(d.unread>999?'999+':d.unread)+'</span>';
   else if (d.mentions > 0) badge = '<span class="badge">@</span>';
@@ -84,3 +88,62 @@ $('#dlgList').addEventListener('click', function(e){
 });
 
 /* ============================== chat view ============================== */
+
+
+/* ============================== global search ============================== */
+var gsTimer = null;
+var gsToken = 0;
+function gsClose(){
+  var box = $('#gsearch');
+  if (box) box.hidden = true;
+}
+function gsRender(r, q){
+  var box = $('#gsearch');
+  if (!box) return;
+  var html = '';
+  (r.chats || []).slice(0, 7).forEach(function(d){
+    html += '<div class="gs-item" data-open="' + d.id + '">' +
+      avatarHTML(d.id, d.is_self ? 'Saved' : d.name, d.has_photo, '', colorFor(d.id)) +
+      '<div class="gs-body"><div class="gs-name">' + esc(d.name) + '</div>' +
+      '<div class="gs-sub">' + esc(d.username ? '@' + d.username : d.type) + '</div></div></div>';
+  });
+  (r.messages || []).slice(0, 7).forEach(function(m){
+    var name = (m.chat && m.chat.name) || 'Chat';
+    html += '<div class="gs-item" data-open="' + m.chat_id + '" data-jump="' + m.id + '">' +
+      avatarHTML(m.chat_id, name, m.chat ? m.chat.has_photo : false, '', colorFor(m.chat_id)) +
+      '<div class="gs-body"><div class="gs-name">' + esc(name) + '</div>' +
+      '<div class="gs-sub">' + esc((m.raw || m.snippet || '').slice(0, 70)) + '</div></div></div>';
+  });
+  if (!html) html = '<div class="gs-item gs-none">No results for “' + esc(q) + '”</div>';
+  html = '<div class="gs-head">Global search</div>' + html;
+  box.innerHTML = html;
+  box.hidden = false;
+}
+$('#dlgSearch').addEventListener('input', function(){
+  clearTimeout(gsTimer);
+  var q = this.value.trim();
+  if (q.length < 2){ gsClose(); return; }
+  gsTimer = setTimeout(function(){
+    var tok = ++gsToken;
+    api('api/search_global?q=' + encodeURIComponent(q)).then(function(r){
+      if (tok === gsToken) gsRender(r, q);
+    }).catch(function(){});
+  }, 350);
+});
+$('#dlgSearch').addEventListener('keydown', function(e){
+  if (e.key === 'Escape'){ gsClose(); }
+});
+$('#gsearch').addEventListener('mousedown', function(e){
+  var it = e.target.closest('.gs-item');
+  if (!it) return;
+  e.preventDefault();
+  gsClose();
+  var id = Number(it.dataset.open);
+  if (!id) return;
+  var jump = it.dataset.jump;
+  openChat(id);
+  if (jump) setTimeout(function(){ jumpTo(Number(jump)); }, 600);
+});
+document.addEventListener('click', function(e){
+  if (!e.target.closest('#gsearch') && !e.target.closest('#dlgSearch')) gsClose();
+});

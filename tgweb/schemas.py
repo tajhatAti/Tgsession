@@ -8,6 +8,14 @@ class PasswordBody(BaseModel):
     password: str = ""
 
 
+class PhoneBody(BaseModel):
+    phone: str = ""
+
+
+class CodeBody(BaseModel):
+    code: str = ""
+
+
 class SessionBody(BaseModel):
     session: str = ""
 
@@ -30,10 +38,23 @@ class DeleteBody(BaseModel):
     revoke: bool = True
 
 
+class ProfileEditBody(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    about: Optional[str] = None
+
+
+class CallbackBody(BaseModel):
+    chat_id: int
+    msg_id: int
+    data: str = ""
+
+
 class ForwardBody(BaseModel):
     from_chat_id: int
     msg_ids: List[int]
     to_chat_id: int
+    hide_sender: bool = False
 
 
 class ReadBody(BaseModel):

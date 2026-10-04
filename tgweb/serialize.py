@@ -1,5 +1,6 @@
 """Serialization: Telethon dialogs/messages/members -> JSON-safe dicts.
 Every field is null-safe: one broken message must never break the list."""
+import base64
 import re
 import time
 from datetime import datetime, timezone
@@ -318,6 +319,60 @@ def snippet_text(m, limit: int = 120) -> str:
         return ""
 
 
+def buttons_json(m) -> Optional[List[List[dict]]]:
+    """Inline keyboard buttons shown under a (bot) message."""
+    try:
+        rm = getattr(m, "reply_markup", None)
+        if not isinstance(rm, types.ReplyInlineMarkup):
+            return None
+        rows = []
+        for row in (rm.rows or []):
+            btns = []
+            for b in (getattr(row, "buttons", None) or []):
+                t = getattr(b, "type", None)
+                item = {"text": getattr(b, "text", "") or ""}
+                if isinstance(t, types.InlineButtonTypeUrl):
+                    item["url"] = getattr(t, "url", None)
+                elif isinstance(t, types.InlineButtonTypeUrlAuth):
+                    item["url"] = getattr(t, "url", None)
+                elif isinstance(t, types.InlineButtonTypeWebView):
+                    item["url"] = getattr(t, "url", None)
+                    item["webview"] = True
+                elif isinstance(t, types.InlineButtonTypeCallback):
+                    try:
+                        item["data"] = base64.b64encode(t.data or b"").decode("ascii")
+                    except Exception:
+                        item["data"] = ""
+                elif isinstance(t, types.InlineButtonTypeSwitchInline):
+                    item["switch"] = getattr(t, "query", "") or ""
+                elif isinstance(t, types.InlineButtonTypeCopy):
+                    item["copy"] = getattr(t, "copy_text", "") or ""
+                elif isinstance(t, types.InlineButtonTypeGame):
+                    item["game"] = True
+                btns.append(item)
+            if btns:
+                rows.append(btns)
+        return rows or None
+    except Exception:
+        return None
+
+
+def keyboard_json(m) -> Optional[List[List[str]]]:
+    """Bot reply keyboard (shown above the composer while the bot chat is open)."""
+    try:
+        rm = getattr(m, "reply_markup", None)
+        if not isinstance(rm, types.ReplyKeyboardMarkup):
+            return None
+        rows = []
+        for row in (rm.rows or []):
+            texts = [getattr(b, "text", "") or "" for b in (getattr(row, "buttons", None) or [])]
+            if texts:
+                rows.append(texts)
+        return rows or None
+    except Exception:
+        return None
+
+
 def message_to_json(m, chat_id: Optional[int] = None) -> Optional[dict]:
     if m is None or isinstance(m, types.MessageEmpty):
         return None
@@ -353,13 +408,16 @@ def message_to_json(m, chat_id: Optional[int] = None) -> Optional[dict]:
             "edited": bool(getattr(m, "edit_date", None)),
             "views": getattr(m, "views", None),
             "forward_from": fwd,
+            "buttons": buttons_json(m),
+            "keyboard": keyboard_json(m),
+            "grouped_id": getattr(m, "grouped_id", None),
         }
     except Exception as e:
         log.warning("failed to serialize message %s: %s", mid, e)
         return {"id": mid, "chat_id": chat_id, "date": None, "out": False, "sender": None,
                 "html": "", "raw": "", "service": True, "reply_to": None, "media": None,
                 "webpage": None, "reactions": None, "edited": False, "views": None,
-                "forward_from": None, "error": True}
+                "forward_from": None, "buttons": None, "keyboard": None, "grouped_id": None, "error": True}
 
 
 def reply_info(m, local: Dict[int, Any], fetched: Dict[int, Any]) -> Optional[dict]:

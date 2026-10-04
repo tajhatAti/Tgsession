@@ -3,14 +3,18 @@ send/edit/delete/forward, read/typing, reactions, pin/mute/archive, upload."""
 from datetime import datetime
 from typing import List, Optional
 
+import base64
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from telethon import functions, types
 from telethon import errors as tg_errors
+from telethon.utils import get_input_channel, get_input_user, get_peer_id
 
 from ..config import MAX_UPLOAD, log
-from ..schemas import (ArchiveBody, DeleteBody, EditBody, ForwardBody, MuteBody,
+from ..schemas import (ArchiveBody, CallbackBody, DeleteBody, EditBody, ForwardBody, MuteBody,
                        PinBody, ReactBody, ReadBody, SendBody, TypingBody)
-from ..serialize import dialog_to_json, participant_json, serialize_messages
+from ..serialize import (dialog_to_json, display_name, message_to_json, participant_json,
+                         serialize_messages, user_status_text)
 from ..security import require_site
 from ..tgstate import require_client, resolve_entity, state
 from ..updates import typing_names
@@ -220,7 +224,8 @@ async def api_forward(body: ForwardBody):
     if not ids:
         raise HTTPException(400, "No messages selected")
     try:
-        await client.forward_messages(dst, ids, from_peer=src)
+        await client.forward_messages(dst, ids, from_peer=src,
+                                      drop_author=bool(getattr(body, "hide_sender", False)))
     except tg_errors.RPCError as e:
         raise HTTPException(400, "Telegram error: %s" % e)
     return {"ok": True}
@@ -300,18 +305,183 @@ async def api_archive(body: ArchiveBody):
 # ---- upload ------------------------------------------------------------------
 
 @router.post("/upload")
-async def api_upload(chat_id: int = Form(...), caption: str = Form(""), file: UploadFile = File(...)):
+async def api_upload(chat_id: int = Form(...), caption: str = Form(""),
+                     voice: int = Form(0), duration: int = Form(0),
+                     file: UploadFile = File(...)):
     client = await require_client()
     entity = await resolve_entity(client, chat_id)
     data = await file.read(MAX_UPLOAD + 1)
     if not data:
         raise HTTPException(400, "Empty file")
     if len(data) > MAX_UPLOAD:
-        raise HTTPException(413, "File too large (limit is 50 MB)")
+        raise HTTPException(413, "File too large (limit is 2 GB)")
+    extra = {}
+    if voice:
+        # recorded voice note from the browser
+        attrs = [types.DocumentAttributeAudio(duration=max(0, int(duration or 0)), voice=True,
+                                              waveform=b"\x02" * 63)]
+        extra = {"attributes": attrs, "mime_type": (file.content_type or "audio/ogg")}
     try:
         msg = await client.send_file(entity, data, file_name=file.filename or "file",
-                                     caption=(caption or None), force_document=False)
+                                     caption=(caption or None), force_document=False, **extra)
     except tg_errors.RPCError as e:
         raise HTTPException(400, "Telegram error: %s" % e)
     data_j = await serialize_messages(client, entity, [msg], chat_id)
     return {"message": data_j[0] if data_j else None}
+
+
+# ---- profile (user / group / channel info) ----------------------------------
+@router.get("/profile")
+async def api_profile(chat_id: int):
+    client = await require_client()
+    entity = await resolve_entity(client, chat_id)
+    try:
+        e = await client.get_entity(entity)
+    except Exception:
+        e = None
+    out = {"id": chat_id, "type": "chat", "name": None, "username": None, "phone": None,
+           "bio": None, "status": None, "verified": False, "premium": False,
+           "is_self": False, "is_bot": False, "has_photo": False,
+           "members": None, "online": None, "common": None, "link": None}
+    try:
+        if isinstance(e, types.User):
+            is_bot = bool(getattr(e, "bot", False))
+            is_self = bool(getattr(e, "is_self", False) or getattr(e, "self", False))
+            out.update({"type": "bot" if is_bot else "user", "is_bot": is_bot,
+                        "is_self": is_self, "name": display_name(e),
+                        "username": getattr(e, "username", None),
+                        "phone": getattr(e, "phone", None),
+                        "status": None if is_bot else user_status_text(e),
+                        "verified": bool(getattr(e, "verified", False)),
+                        "premium": bool(getattr(e, "premium", False)),
+                        "has_photo": getattr(e, "photo", None) is not None})
+            try:
+                res = await client(functions.users.GetFullUserRequest(id=get_input_user(e)))
+                fu = getattr(res, "full_user", None)
+                if fu is not None:
+                    out["bio"] = getattr(fu, "about", None)
+                    out["common"] = getattr(fu, "common_chats_count", None)
+                    if getattr(res, "users", None):
+                        fresh = next((u for u in res.users if getattr(u, "id", None) == e.id), e)
+                        out["status"] = None if is_bot else user_status_text(fresh)
+                        out["premium"] = bool(getattr(fresh, "premium", False))
+                        out["has_photo"] = getattr(fresh, "photo", None) is not None
+            except tg_errors.RPCError:
+                pass
+            except Exception:
+                pass
+        elif isinstance(e, types.Channel):
+            out.update({"type": "channel" if e.broadcast else "group",
+                        "name": display_name(e),
+                        "username": getattr(e, "username", None),
+                        "verified": bool(getattr(e, "verified", False)),
+                        "has_photo": getattr(e, "photo", None) is not None,
+                        "members": getattr(e, "participants_count", None)})
+            try:
+                res = await client(functions.channels.GetFullChannelRequest(
+                    channel=get_input_channel(e)))
+                fc = getattr(res, "full_chat", None)
+                if fc is not None:
+                    out["bio"] = getattr(fc, "about", None)
+                    out["members"] = getattr(fc, "participants_count", None)
+                    out["online"] = getattr(fc, "online_count", None)
+            except Exception:
+                pass
+        elif isinstance(e, types.Chat):
+            out.update({"type": "group", "name": display_name(e),
+                        "has_photo": getattr(e, "photo", None) is not None,
+                        "members": getattr(e, "participants_count", None)})
+            try:
+                res = await client(functions.messages.GetFullChatRequest(chat_id=e.id))
+                fc = getattr(res, "full_chat", None)
+                if fc is not None:
+                    out["bio"] = getattr(fc, "about", None)
+                    parts = getattr(fc, "participants", None)
+                    if parts is not None:
+                        out["members"] = len(getattr(parts, "participants", None) or [])
+            except Exception:
+                pass
+        if out["username"]:
+            out["link"] = "https://t.me/" + out["username"]
+        elif out["type"] in ("group", "channel"):
+            out["link"] = None
+    except Exception as ex:
+        log.warning("profile serialize failed: %s", ex)
+    return out
+
+
+# ---- bot inline button callback ---------------------------------------------
+@router.post("/callback")
+async def api_callback(body: CallbackBody):
+    client = await require_client()
+    entity = await resolve_entity(client, body.chat_id)
+    data = None
+    try:
+        data = base64.b64decode(body.data or "") or None
+    except Exception:
+        data = None
+    try:
+        res = await client(functions.messages.GetBotCallbackAnswerRequest(
+            peer=entity, msg_id=body.msg_id, data=data))
+    except tg_errors.RPCError as e:
+        raise HTTPException(400, "Telegram error: %s" % e)
+    # the bot may have edited its message as a reaction to the button
+    msg = None
+    try:
+        fetched = await client.get_messages(entity, ids=[body.msg_id])
+        if fetched and fetched[0] is not None:
+            ser = await serialize_messages(client, entity, [fetched[0]], body.chat_id)
+            msg = ser[0] if ser else None
+    except Exception:
+        pass
+    return {"ok": True, "answer": getattr(res, "message", None) or "",
+            "alert": bool(getattr(res, "alert", False)),
+            "url": getattr(res, "url", None), "message": msg}
+
+
+# ---- global search (all chats + messages everywhere) -------------------------
+@router.get("/search_global")
+async def api_search_global(q: str = Query(..., min_length=1),
+                            limit: int = Query(20, ge=1, le=50)):
+    client = await require_client()
+    q = q.strip()
+    chats = []
+    try:
+        async for d in client.iter_dialogs(search=q, limit=10):
+            dj = dialog_to_json(d)
+            if dj:
+                chats.append(dj)
+    except Exception as e:
+        log.warning("global dialog search failed: %s", e)
+    messages = []
+    try:
+        res = await client(functions.messages.SearchGlobalRequest(
+            q=q, filter=types.InputMessagesFilterEmpty(),
+            min_date=None, max_date=None, offset_rate=0,
+            offset_peer=types.InputPeerEmpty(), offset_id=0, limit=limit))
+        emap = {}
+        for c in (getattr(res, "chats", None) or []):
+            emap[get_peer_id(c)] = c
+        for u in (getattr(res, "users", None) or []):
+            emap[get_peer_id(u)] = u
+        for m in (getattr(res, "messages", None) or []):
+            mj = message_to_json(m)
+            if not mj:
+                continue
+            pid = m.chat_id if m.chat_id is not None else None
+            ent = emap.get(pid) if pid is not None else None
+            etype = "chat"
+            if isinstance(ent, types.User):
+                etype = "bot" if getattr(ent, "bot", False) else "user"
+            elif isinstance(ent, types.Channel):
+                etype = "channel" if ent.broadcast else "group"
+            elif isinstance(ent, types.Chat):
+                etype = "group"
+            mj["chat"] = {"id": pid,
+                          "name": display_name(ent) if ent is not None else None,
+                          "type": etype,
+                          "has_photo": getattr(ent, "photo", None) is not None if ent is not None else False}
+            messages.append(mj)
+    except Exception as e:
+        log.warning("global message search failed: %s", e)
+    return {"chats": chats, "messages": messages}

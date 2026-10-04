@@ -24,7 +24,7 @@ SESSION_FILE = "tgsess.txt"
 AUTH_COOKIE = "tgw_auth"
 AUTH_TTL = 30 * 24 * 3600
 AUTH_KEY = hashlib.sha256(b"tgw-auth-v1|" + PASSWORD.encode("utf-8")).digest()
-MAX_UPLOAD = 50 * 1024 * 1024
+MAX_UPLOAD = 2 * 1024 * 1024 * 1024   # Telegram user accounts: 2 GB per file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tgweb")

@@ -6,6 +6,8 @@ function closeChat(){
   S.oldest = 0; S.newest = 0; S.hasMore = true;
   clearReply(); clearEditing(); clearPendingFile(); exitSelecting(); closeCSearch();
   stopPolling();
+  var kb = document.getElementById('botKb');
+  if (kb){ kb.hidden = true; kb.innerHTML = ''; }
   document.body.classList.remove('chat-open');
   $('#chat').hidden = true;
   $('#empty').hidden = false;
@@ -49,6 +51,8 @@ function openChat(id){
   $('#empty').hidden = true;
   $('#chat').hidden = false;
   $('#msgs').innerHTML = '<div class="spinner"></div>';
+  var kb0 = document.getElementById('botKb');
+  if (kb0){ kb0.hidden = true; kb0.innerHTML = ''; }
   updateChatHeader();
   renderDialogs();
   startPolling();
@@ -68,6 +72,8 @@ function openChat(id){
     scrollBottom();
     setTyping(r.typing || []);
     updateFab();
+    updateBotKb();
+    restoreDraft(chatId);
     if (window.matchMedia('(min-width:900px)').matches) $('#input').focus();
   }).catch(function(e){
     $('#msgs').innerHTML = '';
@@ -76,7 +82,7 @@ function openChat(id){
 }
 $('#btnBack').addEventListener('click', closeChat);
 $('#chatTitleWrap').addEventListener('click', function(){
-  if (S.dlg && (S.dlg.type === 'group' || S.dlg.type === 'channel')) openMembers();
+  if (S.current != null) openProfile(S.current);
 });
 
 /* ============================== message rendering ============================== */
@@ -122,10 +128,10 @@ function mediaHTML(m){
   var k = mi.kind;
   if (k === 'photo'){
     var st = (mi.w && mi.h) ? ' style="aspect-ratio:' + mi.w + '/' + mi.h + ';max-height:60vh;object-fit:cover"' : '';
-    return '<div class="photo"><img loading="lazy"' + st + ' src="' + u + '?kind=thumb" data-act="view" data-kind="photo" data-full="' + u + '?kind=photo" onerror="this.onerror=null;this.src=this.getAttribute(&quot;data-full&quot;)"></div>';
+    return '<div class="photo"><img loading="lazy"' + st + ' src="' + u + '?kind=thumb" data-act="view" data-mid="' + m.id + '" data-kind="photo" data-full="' + u + '?kind=photo" onerror="this.onerror=null;this.src=this.getAttribute(&quot;data-full&quot;)"></div>';
   }
   if (k === 'video' || k === 'gif' || k === 'videonote'){
-    return '<div class="video-wrap" data-act="view" data-kind="' + k + '">' +
+    return '<div class="video-wrap" data-act="view" data-mid="' + m.id + '" data-kind="' + k + '">' +
       '<img loading="lazy" src="' + u + '?kind=thumb" style="min-width:120px;min-height:90px" onerror="this.onerror=null;this.src=\'' + TINY_GIF + '\'" alt="">' +
       '<span class="play"><svg class="ic big"><use href="#i-play"/></svg></span>' +
       (mi.duration ? '<span class="dur">' + fmtDur(mi.duration) + '</span>' : '') + '</div>';
@@ -169,6 +175,30 @@ function mediaHTML(m){
   }
   return '<div class="fsize">' + esc(mi.label || 'Media') + '</div>';
 }
+function buttonsHTML(m){
+  if (!m.buttons || !m.buttons.length) return '';
+  var rows = m.buttons.map(function(row){
+    var btns = row.map(function(b){
+      if (b.url){
+        return '<a class="ibtn" href="' + esc(b.url) + '" target="_blank" rel="noopener noreferrer">' +
+          esc(b.text) + (b.webview ? ' ⚡' : '') + '</a>';
+      }
+      if (b.data){
+        return '<button type="button" class="ibtn" data-cb="' + esc(b.data) +
+          '" data-cbmsg="' + m.id + '">' + esc(b.text) + '</button>';
+      }
+      if (b.copy){
+        return '<button type="button" class="ibtn" data-copyb="' + esc(b.copy) + '">' + esc(b.text) + '</button>';
+      }
+      if (b.switch){
+        return '<button type="button" class="ibtn" data-switch="' + esc(b.switch) + '">' + esc(b.text) + '</button>';
+      }
+      return '<span class="ibtn">' + esc(b.text) + '</span>';
+    }).join('');
+    return '<div class="irow">' + btns + '</div>';
+  }).join('');
+  return '<div class="ibtns">' + rows + '</div>';
+}
 function messageHTML(m, prev){
   if (m.service){
     return '<div class="svc" data-id="' + m.id + '">' + (m.html || 'Service message') + '</div>';
@@ -189,22 +219,63 @@ function messageHTML(m, prev){
   if (m.reactions && m.reactions.length) inner += reactionsHTML(m);
   inner += '<span class="meta">' + (m.edited ? 'edited ' : '') + esc(fmtClock(m.date)) + (out ? checksHTML(m) : '') + '</span>';
   if (m.views) inner += '<span class="fsize">👁 ' + Number(m.views).toLocaleString() + '</span>';
+  inner += buttonsHTML(m);
   var av = '';
   if (!out && inGroup && m.sender){
     av = avatarHTML(m.sender.id, m.sender.name, false, '', colorFor(m.sender.id));
   }
+  var sticker = m.media && m.media.kind === 'sticker';
   return '<div class="' + cls.join(' ') + '" data-id="' + m.id + '">' + av +
+    '<div class="bub' + (sticker ? ' stickerbub' : '') + '">' + inner + '</div>' +
+    '<div class="acts"><button class="abtn" data-a="react" title="React">👍</button>' +
+    '<button class="abtn" data-a="menu" title="More"><svg class="ic"><use href="#i-more"/></svg></button></div>' +
+    '</div>';
+}
+/* one bubble containing several grouped photos/videos (album) */
+function albumHTML(group, prev){
+  var m = group[0];
+  var out = !!m.out;
+  var cls = ['msg', out ? 'out' : 'in'];
+  if (isFirstOfGroup(m, prev)) cls.push('first');
+  var inner = '';
+  if (m.forward_from) inner += '<div class="fwd">Forwarded from ' + esc(m.forward_from) + '</div>';
+  var inGroup = S.dlg && (S.dlg.type === 'group');
+  if (!out && inGroup && m.sender && m.sender.name){
+    inner += '<div class="sender" data-uid="' + m.sender.id + '" style="color:' + colorFor(m.sender.id) + '">' + esc(m.sender.name) + '</div>';
+  }
+  inner += '<div class="album">' + group.map(function(g){ return mediaHTML(g); }).join('') + '</div>';
+  var cap = group.filter(function(g){ return g.html; })[0];
+  if (cap) inner += '<div class="text">' + cap.html + '</div>';
+  var last = group[group.length - 1];
+  inner += '<span class="meta">' + (last.edited ? 'edited ' : '') + esc(fmtClock(last.date)) + (out ? checksHTML(last) : '') + '</span>';
+  var av = '';
+  if (!out && inGroup && m.sender){
+    av = avatarHTML(m.sender.id, m.sender.name, false, '', colorFor(m.sender.id));
+  }
+  var gids = group.map(function(g){ return g.id; }).join(',');
+  return '<div class="' + cls.join(' ') + '" data-id="' + m.id + '" data-gids="' + gids + '">' + av +
     '<div class="bub">' + inner + '</div>' +
     '<div class="acts"><button class="abtn" data-a="react" title="React">👍</button>' +
     '<button class="abtn" data-a="menu" title="More"><svg class="ic"><use href="#i-more"/></svg></button></div>' +
     '</div>';
+}
+/* consume a run of grouped messages starting at index i; returns html */
+function groupRunHTML(list, i, prev){
+  var m = list[i];
+  var grp = [m];
+  var j = i + 1;
+  while (j < list.length && list[j].grouped_id === m.grouped_id && !list[j].service){
+    grp.push(list[j]); j++;
+  }
+  return {html: albumHTML(grp, prev), next: j};
 }
 function buildListHTML(){
   if (!S.msgs.length) return '<div class="empty-list" style="margin:auto">No messages here yet.<br>Say hello 👋</div>';
   var html = '';
   var prev = null;
   var chipDone = false;
-  S.msgs.forEach(function(m){
+  for (var i = 0; i < S.msgs.length; i++){
+    var m = S.msgs[i];
     var pd = prev && prev.date ? new Date(prev.date) : null;
     var d = m.date ? new Date(m.date) : null;
     if ((d && !pd) || (d && pd && !sameDay(pd, d))){
@@ -214,9 +285,17 @@ function buildListHTML(){
       html += '<div class="unread-chip">Unread messages</div>';
       chipDone = true;
     }
-    html += messageHTML(m, prev);
-    prev = m;
-  });
+    if (!m.service && m.grouped_id && i + 1 < S.msgs.length &&
+        S.msgs[i + 1].grouped_id === m.grouped_id){
+      var run = groupRunHTML(S.msgs, i, prev);
+      html += run.html;
+      i = run.next - 1;
+      prev = S.msgs[i];
+    } else {
+      html += messageHTML(m, prev);
+      prev = m;
+    }
+  }
   return html;
 }
 function renderAllMessages(){
@@ -230,15 +309,23 @@ function appendNodes(list){
   var prevIdx = S.msgs.length - list.length - 1;
   var prev = prevIdx >= 0 ? S.msgs[prevIdx] : null;
   var html = '';
-  list.forEach(function(m){
+  for (var i = 0; i < list.length; i++){
+    var m = list[i];
     var pd = prev && prev.date ? new Date(prev.date) : null;
     var d = m.date ? new Date(m.date) : null;
     if ((d && !pd) || (d && pd && !sameDay(pd, d))){
       html += '<div class="day-chip">' + esc(dayLabel(d)) + '</div>';
     }
-    html += messageHTML(m, prev);
-    prev = m;
-  });
+    if (!m.service && m.grouped_id && i + 1 < list.length && list[i + 1].grouped_id === m.grouped_id){
+      var run = groupRunHTML(list, i, prev);
+      html += run.html;
+      i = run.next - 1;
+      prev = list[i];
+    } else {
+      html += messageHTML(m, prev);
+      prev = m;
+    }
+  }
   box.insertAdjacentHTML('beforeend', html);
 }
 function replaceMessage(m){
@@ -352,6 +439,7 @@ function pollMessages(){
       if (nearBottom || fresh[fresh.length - 1].out) scrollBottom();
       updateDialogPreview(fresh[fresh.length - 1]);
     }
+    updateBotKb();
     setTyping(r.typing || []);
     updateChecks();
     updateFab();
@@ -398,3 +486,74 @@ function jumpTo(id){
 }
 
 /* ============================== composer ============================== */
+
+
+/* ============================== bot reply keyboard ============================== */
+function updateBotKb(){
+  var box = $('#botKb');
+  if (!box) return;
+  var kb = null;
+  for (var i = S.msgs.length - 1; i >= 0; i--){
+    if (S.msgs[i].keyboard && S.msgs[i].keyboard.length){ kb = S.msgs[i].keyboard; break; }
+  }
+  if (!kb){ box.hidden = true; box.innerHTML = ''; return; }
+  var html = kb.map(function(row){
+    return '<div class="krow">' + row.map(function(b){
+      return '<button type="button" class="kbtn" data-kb="' + esc(b.text) + '">' + esc(b.text) + '</button>';
+    }).join('') + '</div>';
+  }).join('');
+  if (box.innerHTML !== html){ box.innerHTML = html; }
+  box.hidden = false;
+}
+$('#botKb').addEventListener('click', function(e){
+  var b = e.target.closest('.kbtn');
+  if (!b) return;
+  var input = $('#input');
+  input.value = b.dataset.kb;
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  var f = document.getElementById('f-send');
+  if (f) f.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+});
+
+/* ============================== inline bot buttons ============================== */
+$('#msgs').addEventListener('click', function(e){
+  var el;
+  if ((el = e.target.closest('.ibtn[data-copyb]'))){
+    e.preventDefault(); e.stopPropagation();
+    var txt = el.dataset.copyb;
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(function(){ toast('Copied'); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('Copied'); } catch (err){}
+      ta.remove();
+    }
+    return;
+  }
+  if ((el = e.target.closest('.ibtn[data-switch]'))){
+    e.preventDefault(); e.stopPropagation();
+    var input = $('#input');
+    input.value = el.dataset.switch;
+    input.focus();
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    return;
+  }
+  if ((el = e.target.closest('.ibtn[data-cb]'))){
+    e.preventDefault(); e.stopPropagation();
+    if (el.disabled) return;
+    el.disabled = true; el.classList.add('busy');
+    api('api/callback', {method: 'POST', body: {
+      chat_id: S.current,
+      msg_id: Number(el.dataset.cbmsg),
+      data: el.dataset.cb
+    }}).then(function(r){
+      if (r.url){ window.open(r.url, '_blank', 'noopener'); }
+      else if (r.message !== undefined && r.message !== null && r.message !== ''){
+        if (r.alert){ openModal('<h3>' + esc(r.message) + '</h3><button class="btn primary mclose">OK</button>'); }
+        else { toast(r.message); }
+      }
+    }).catch(function(err){ toastErr(err); })
+      .finally(function(){ el.disabled = false; el.classList.remove('busy'); });
+  }
+});

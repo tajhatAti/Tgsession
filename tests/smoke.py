@@ -170,15 +170,23 @@ check('A: duplicated session 409 mentions IP', code == 409 and 'IP' in data['det
 code, hdrs, data = jreq('POST', '/api/tg/import_session', {'session': fake.make_session('expired')})
 check('A: expired session 400', code == 400, (code, data))
 
-# session-only login: phone/OTP/2FA endpoints must NOT exist any more
+# phone + OTP + 2FA login flow (account sign-in)
 code, hdrs, data = jreq('POST', '/api/tg/login_phone', {'phone': '+8801111111111'})
-check('A: phone login endpoint removed', code in (404, 405), (code, data))
-code, hdrs, data = jreq('POST', '/api/tg/login_code', {'code': '12345'})
-check('A: code login endpoint removed', code in (404, 405), (code, data))
-code, hdrs, data = jreq('POST', '/api/tg/login_password', {'password': 'x'})
-check('A: 2fa login endpoint removed', code in (404, 405), (code, data))
+check('A: send code ok', code == 200 and data.get('ok'), (code, data))
+code, hdrs, data = jreq('POST', '/api/tg/login_code', {'code': '00000'})
+check('A: wrong code 400', code == 400, (code, data))
+code, hdrs, data = jreq('POST', '/api/tg/login_code', {'code': '12 345'})
+check('A: correct code -> need_password', code == 200 and data.get('need_password'), (code, data))
+code, hdrs, data = jreq('POST', '/api/tg/login_password', {'password': 'wrong'})
+check('A: wrong 2fa 400', code == 400, (code, data))
+code, hdrs, data = jreq('POST', '/api/tg/login_password', {'password': 'secret'})
+check('A: 2fa ok -> logged in as Ahad', code == 200 and data['me']['name'] == 'Ahad', (code, data))
+check('A: tgsess.txt written', os.path.exists('tgsess.txt'))
+code, hdrs, data = jreq('POST', '/api/tg/logout')
+check('A: logout before session import', code == 200, (code, data))
+check('A: tgsess.txt removed', not os.path.exists('tgsess.txt'))
 
-# the ONLY telegram login: import a valid session string
+# session string login (the second method)
 code, hdrs, data = jreq('POST', '/api/tg/import_session', {'session': fake.make_session('good')})
 check('A: import session -> logged in as Ahad', code == 200 and data['me']['name'] == 'Ahad', (code, data))
 check('A: tgsess.txt written', os.path.exists('tgsess.txt'))
@@ -232,7 +240,7 @@ check('C: me passed', data.get('me', {}).get('name') == 'Ahad', data.get('me'))
 G = fake.ID_GROUP
 code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&limit=50' % G)
 msgs = data['messages'] if data else []
-check('C: messages 200 newest-first', code == 200 and msgs[0]['id'] == 120, (code, msgs[:1]))
+check('C: messages 200 newest-first', code == 200 and msgs[0]['id'] == 124, (code, msgs[:1]))
 m120 = next(m for m in msgs if m['id'] == 120)
 check('C: bold entity -> strong', '<strong>bold</strong>' in m120['html'], m120['html'])
 check('C: sender serialized', m120['sender']['name'] == 'Alice Wonder', m120['sender'])
@@ -273,7 +281,7 @@ check('C: offset_id pagination (older)', all(i < 110 for i in ids) and len(ids) 
 
 code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&min_id=118' % G)
 ids = [m['id'] for m in data['messages']]
-check('C: min_id poll (newer)', sorted(ids) == [119, 120], ids)
+check('C: min_id poll (newer)', sorted(ids) == [119, 120, 123, 124], ids)
 
 code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&anchor_id=112&limit=10' % G)
 ids = [m['id'] for m in data['messages']]
@@ -335,7 +343,7 @@ check('C: avatar without photo 404', code == 404, code)
 # ---- send / edit / react / pin / forward / read / delete
 code, hdrs, data = jreq('POST', '/api/send', {'chat_id': G, 'text': 'hello <b>world</b>', 'reply_to': 112})
 m = data.get('message') if data else None
-check('C: send html ok', code == 200 and m and m['id'] == 121 and m['out'] is True, (code, data))
+check('C: send html ok', code == 200 and m and m['id'] == 125 and m['out'] is True, (code, data))
 check('C: sent reply_to populated', m and m['reply_to']['id'] == 112
       and 'react' in (m['reply_to']['snippet'] or ''), m and m['reply_to'])
 
@@ -344,7 +352,7 @@ m2 = data.get('message') if data else None
 check('C: send invalid-html falls back to plain', code == 200 and m2
       and m2['raw'] == 'math: 5 < 10 but 3 > 1', (code, data))
 
-code, hdrs, data = jreq('POST', '/api/edit', {'chat_id': G, 'msg_id': 121, 'text': 'hello edited'})
+code, hdrs, data = jreq('POST', '/api/edit', {'chat_id': G, 'msg_id': 125, 'text': 'hello edited'})
 check('C: edit ok', code == 200 and data['message']['raw'] == 'hello edited', (code, data))
 
 code, hdrs, data = jreq('POST', '/api/react', {'chat_id': G, 'msg_id': 112, 'emoji': '🔥'})
@@ -357,7 +365,7 @@ reacts = data.get('message', {}).get('reactions') if data else None
 check('C: react toggle removes mine', code == 200 and reacts is not None
       and all(not r['me'] for r in reacts), (code, reacts))
 
-code, hdrs, data = jreq('POST', '/api/pin', {'chat_id': G, 'msg_id': 121, 'pinned': True})
+code, hdrs, data = jreq('POST', '/api/pin', {'chat_id': G, 'msg_id': 125, 'pinned': True})
 check('C: pin ok', code == 200, (code, data))
 
 code, hdrs, data = jreq('POST', '/api/forward',
@@ -430,11 +438,84 @@ check('C: uploaded file downloads identical', code == 200 and raw == b'hello upl
       (code, len(raw)))
 
 # delete
-code, hdrs, data = jreq('POST', '/api/delete', {'chat_id': G, 'msg_ids': [121, 122]})
+code, hdrs, data = jreq('POST', '/api/delete', {'chat_id': G, 'msg_ids': [125, 122]})
 check('C: delete ok', code == 200, (code, data))
 code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&min_id=119' % G)
 check('C: deleted gone', all(m['id'] not in (121, 122) for m in data['messages']),
       [m['id'] for m in data['messages']])
+
+# ---- albums (grouped media) ----
+m124 = next(m for m in msgs if m['id'] == 124)
+m123 = next(m for m in msgs if m['id'] == 123)
+check('C: album grouped_id set on both', m124['grouped_id'] is not None
+      and m124['grouped_id'] == m123['grouped_id'], (m124['grouped_id'], m123['grouped_id']))
+
+# ---- bot inline buttons + reply keyboard ----
+code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d' % fake.ID_BOT)
+bmsgs = data['messages'] if data else []
+b3 = next(m for m in bmsgs if m['id'] == 3)
+b2 = next(m for m in bmsgs if m['id'] == 2)
+check('C: inline buttons serialized', b3['buttons'] and b3['buttons'][0][0]['text'] == 'Ping me'
+      and b3['buttons'][0][0].get('data') and b3['buttons'][0][1].get('url') == 'https://example.com'
+      and b3['buttons'][1][0].get('copy') == 'tgw-1234', b3['buttons'])
+check('C: bot reply keyboard serialized', b2['keyboard'] == [['Help', 'About']], b2['keyboard'])
+
+code, hdrs, data = jreq('POST', '/api/callback',
+                        {'chat_id': fake.ID_BOT, 'msg_id': 3, 'data': b3['buttons'][0][0]['data']})
+check('C: button callback -> answer + alert', code == 200 and 'Pong' in (data or {}).get('answer', '')
+      and (data or {}).get('alert') is True, (code, data))
+
+# ---- profile (user / channel / group) ----
+code, hdrs, data = jreq('GET', '/api/profile?chat_id=%d' % fake.ID_ALICE)
+check('C: user profile (bio+username+status)', code == 200 and data['bio'] == 'Hello, I am Alice \U0001f44b'
+      and data['username'] == 'alice' and data['status'] and data['type'] == 'user'
+      and data['common'] == 3, (code, data))
+code, hdrs, data = jreq('GET', '/api/profile?chat_id=%d' % fake.ID_NEWS)
+check('C: channel profile (members+bio)', code == 200 and data['members'] == 12500
+      and data['type'] == 'channel' and 'breaking news' in (data['bio'] or ''), (code, data))
+code, hdrs, data = jreq('GET', '/api/profile?chat_id=%d' % G)
+check('C: group profile (members)', code == 200 and data['members'] == 3
+      and data['type'] == 'group', (code, data))
+
+# ---- forward with hidden sender (drop_author) ----
+code, hdrs, data = jreq('POST', '/api/forward',
+                        {'from_chat_id': G, 'msg_ids': [120], 'to_chat_id': fake.ID_BOB,
+                         'hide_sender': True})
+check('C: forward hide_sender ok', code == 200, (code, data))
+code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d' % fake.ID_BOB)
+hn = data['messages'][0] if data and data['messages'] else None
+check('C: hidden forward has no fwd header', hn and hn['forward_from'] is None
+      and 'bold part' in hn['raw'], hn)
+
+# ---- global search ----
+code, hdrs, data = jreq('GET', '/api/search_global?q=bold')
+check('C: global search finds message + chat name', code == 200
+      and any(m['id'] == 120 and m['chat']['name'] for m in (data or {}).get('messages', []))
+      and len((data or {}).get('chats', [])) >= 0, (code, data))
+code, hdrs, data = jreq('GET', '/api/search_global?q=alice')
+check('C: global search finds chat', code == 200
+      and any(c.get('id') == fake.ID_ALICE for c in (data or {}).get('chats', [])), (code, data))
+
+# ---- voice upload (recorded in browser) ----
+vbody, vhdrs = multipart({'chat_id': str(fake.ID_ALICE), 'caption': '', 'voice': '1',
+                          'duration': '7'}, 'file', 'voice.webm', b'\x00' * 64)
+code, hdrs, data = req('POST', '/api/upload', vbody, vhdrs)
+try:
+    vdata = json.loads(data)
+except Exception:
+    vdata = {}
+vm = (vdata or {}).get('message') or {}
+check('C: voice upload -> voice kind + duration', code == 200
+      and vm.get('media', {}).get('kind') == 'voice'
+      and vm.get('media', {}).get('duration') == 7, (code, vm.get('media')))
+
+# ---- edit own profile (Settings) ----
+code, hdrs, data = jreq('POST', '/api/tg/me/edit',
+                        {'first_name': 'Ahad', 'about': 'night build bio'})
+check('C: me edit ok', code == 200 and (data or {}).get('me', {}).get('name') == 'Ahad', (code, data))
+code, hdrs, data = jreq('GET', '/api/profile?chat_id=%d' % fake.ID_ME)
+check('C: own profile shows edited bio', code == 200 and data['bio'] == 'night build bio'
+      and data['is_self'] is True, (code, data))
 
 # ---- error handling
 code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d' % fake.FLOOD_CHAT)

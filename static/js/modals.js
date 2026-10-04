@@ -23,6 +23,7 @@ function openForwardPicker(ids){
   openModal('<div class="mhead"><b>Forward to…</b>' +
     '<button class="icon-btn" id="fpClose"><svg class="ic"><use href="#i-close"/></svg></button></div>' +
     '<div style="padding:8px 12px 0"><input id="fpSearch" placeholder="Search chats" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);outline:none"></div>' +
+    '<div style="padding:6px 12px 0"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)"><input type="checkbox" id="fpHide"> Hide sender names</label></div>' +
     '<div class="mbody" id="fpList"></div>', true);
   $('#fpClose').onclick = closeModal;
   function render(q){
@@ -39,8 +40,9 @@ function openForwardPicker(ids){
     if (!row) return;
     var to = Number(row.dataset.fid);
     var from = S.current;
+    var hide = !!(document.getElementById('fpHide') && document.getElementById('fpHide').checked);
     closeModal();
-    api('api/forward', {method: 'POST', body: {from_chat_id: from, msg_ids: ids, to_chat_id: to}})
+    api('api/forward', {method: 'POST', body: {from_chat_id: from, msg_ids: ids, to_chat_id: to, hide_sender: hide}})
       .then(function(){ toast('Forwarded'); openChat(to); })
       .catch(toastErr);
   };

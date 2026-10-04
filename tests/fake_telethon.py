@@ -42,6 +42,8 @@ def _chat_id_of(x):
                     (types.Chat, lambda e: types.PeerChat(chat_id=e.id)),
                     (types.Channel, lambda e: types.PeerChannel(channel_id=e.id)),
                     (types.InputPeerUser, lambda e: types.PeerUser(user_id=e.user_id)),
+                    (types.InputUser, lambda e: types.PeerUser(user_id=e.user_id)),
+                    (types.InputUserSelf, lambda e: types.PeerUser(user_id=777)),
                     (types.InputPeerChat, lambda e: types.PeerChat(chat_id=e.chat_id)),
                     (types.InputPeerChannel, lambda e: types.PeerChannel(channel_id=e.channel_id)),
                     (types.PeerUser, lambda e: e),
@@ -137,6 +139,19 @@ PAYLOADS[9004] = _pattern(50_000)
 PHOTO = types.Photo(id=7001, access_hash=1, file_reference=b'x', date=NOW, dc_id=2,
                     sizes=[types.PhotoSize(type='m', w=800, h=600, size=50_000),
                            types.PhotoSize(type='x', w=1600, h=1200, size=180_000)])
+PHOTO2 = types.Photo(id=7002, access_hash=1, file_reference=b'x', date=NOW, dc_id=2,
+                     sizes=[types.PhotoSize(type='m', w=700, h=900, size=40_000),
+                            types.PhotoSize(type='x', w=1400, h=1800, size=150_000)])
+
+# bios / abouts served by the GetFull* handlers
+USER_BIO = {777: 'TgWeb developer & tester', 101: 'Hello, I am Alice \U0001f44b',
+            401: 'Demo bot - try my buttons!', 501: None, 601: None}
+USER_COMMON = {101: 3, 501: 1}
+CHAT_BIO = {-201: 'The original TgWeb test group',
+            ID_NEWS: 'All the breaking news, 24/7',
+            ID_SUPER: 'Megagroup for TgWeb testing'}
+CHAT_MEMBERS = {ID_NEWS: 12500, ID_SUPER: 42}
+CHAT_ONLINE = {ID_NEWS: 900, ID_SUPER: 7}
 
 
 # ---------------------------------------------------------------- messages
@@ -210,6 +225,38 @@ for i in range(20, 106):
     _add(ID_GROUP, _msg(i, GP, 'older message number %d' % i,
                         sender=(ALICE if i % 2 else BOB), out=(i % 5 == 0)))
 
+# --- bot chat: inline keyboard buttons + bot reply keyboard ---
+BOT_BTNS_MSG = _msg(3, _peer_of(ID_BOT), 'Choose an option:', sender=BOT)
+BOT_BTNS_MSG.reply_markup = types.ReplyInlineMarkup(rows=[
+    types.KeyboardInlineButtonRow(buttons=[
+        types.KeyboardInlineButton(text='Ping me',
+                                   type=types.InlineButtonTypeCallback(data=b'ping')),
+        types.KeyboardInlineButton(text='Open example',
+                                   type=types.InlineButtonTypeUrl(url='https://example.com')),
+    ]),
+    types.KeyboardInlineButtonRow(buttons=[
+        types.KeyboardInlineButton(text='Copy code',
+                                   type=types.InlineButtonTypeCopy(copy_text='tgw-1234')),
+    ]),
+])
+BOT_KB_MSG = _msg(2, _peer_of(ID_BOT), 'keyboard demo - pick a button below', sender=BOT)
+BOT_KB_MSG.reply_markup = types.ReplyKeyboardMarkup(rows=[
+    types.KeyboardButtonRow(buttons=[
+        types.KeyboardButton(text='Help', type=types.ButtonTypeDefault()),
+        types.KeyboardButton(text='About', type=types.ButtonTypeDefault()),
+    ]),
+], resize=True)
+_add(ID_BOT, BOT_BTNS_MSG)
+_add(ID_BOT, BOT_KB_MSG)
+
+# --- grouped photo album in the group ---
+_add(ID_GROUP, _msg(124, GP, '', sender=ALICE,
+                    media=types.MessageMediaPhoto(photo=PHOTO2)))
+_add(ID_GROUP, _msg(123, GP, '', sender=ALICE,
+                    media=types.MessageMediaPhoto(photo=PHOTO)))
+MESSAGES[(ID_GROUP, 124)].grouped_id = 555001
+MESSAGES[(ID_GROUP, 123)].grouped_id = 555001
+
 UP = types.PeerUser(user_id=101)
 _add(ID_ALICE, _msg(25, UP, 'hello from alice', sender=ALICE))
 _add(ID_ALICE, _msg(24, UP, 'hi alice, my reply', out=True, reply_to=25, sender=ME))
@@ -259,10 +306,24 @@ RAW_DIALOGS = [
     _raw_dialog(types.PeerUser(user_id=101), 25, 2, 23),
     _raw_dialog(types.PeerChat(chat_id=201), 120, 12, 105, pinned=True),
     _raw_dialog(types.PeerChannel(channel_id=301), 305, 5, 300),
-    _raw_dialog(types.PeerUser(user_id=401), 0, 0, 0),
+    _raw_dialog(types.PeerUser(user_id=401), 3, 0, 0),
     _raw_dialog(types.PeerUser(user_id=501), 0, 0, 0, mute_until=2147483647),
     _raw_dialog(types.PeerUser(user_id=601), 0, 0, 0, folder=1),
 ]
+
+def display_title(e):
+    """Chat/User display name for global search."""
+    if e is None:
+        return ''
+    t = getattr(e, 'title', None)
+    if t:
+        return t
+    fn, ln = getattr(e, 'first_name', None), getattr(e, 'last_name', None)
+    nm = ('%s %s' % (fn or '', ln or '')).strip()
+    if nm:
+        return nm
+    return '@' + (getattr(e, 'username', '') or '')
+
 
 def _finish_msg(m, client, extra_entities=None):
     try:
@@ -375,20 +436,31 @@ class FakeTelegramClient:
             return types.InputPeerSelf()
         raise ValueError('Could not find any entity corresponding to "{}"'.format(peer))
 
-    async def iter_dialogs(self, limit=None, folder=None, archived=None, **kw):
+    async def iter_dialogs(self, limit=None, folder=None, archived=None, search=None, **kw):
         if self._kind != 'good':
             raise tg_errors.AuthKeyUnregisteredError(None)
-        want_folder = 0 if folder is None else folder
+        # telethon semantics: folder=None + archived=None -> ALL folders
+        want_folder = None
+        if folder is not None:
+            want_folder = folder
+        elif archived is not None:
+            want_folder = 1 if archived else 0
+        ql = (search or '').lower()
         from telethon.tl.custom import Dialog as D
         out = []
         for raw in RAW_DIALOGS:
             f = 0 if raw.folder_id is None else raw.folder_id
-            if f != want_folder:
+            if want_folder is not None and f != want_folder:
                 continue
-            if limit is not None and len(out) >= limit:
-                break
             marked = get_peer_id(raw.peer)
             entity = ENTITIES[marked]
+            if ql:
+                nm = display_title(entity).lower()
+                un = (getattr(entity, 'username', '') or '').lower()
+                if ql not in nm and ql not in un:
+                    continue
+            if limit is not None and len(out) >= limit:
+                break
             entities = {marked: entity}
             if isinstance(entity, types.User):
                 entities[entity.id] = entity
@@ -490,19 +562,21 @@ class FakeTelegramClient:
         return m
 
     async def send_file(self, entity, file, file_name=None, caption=None,
-                        force_document=False, **kw):
+                        force_document=False, attributes=None, mime_type=None, **kw):
         chat = _chat_id_of(entity)
         existing = chat_msgs(chat)
         nid = (existing[0].id + 1) if existing else 1
         doc_id = 50000 + nid
-        mime = 'application/octet-stream'
-        if file_name and '.' in file_name:
+        mime = mime_type or 'application/octet-stream'
+        if not mime_type and file_name and '.' in file_name:
             ext = file_name.rsplit('.', 1)[1].lower()
             mime = {'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
                     'pdf': 'application/pdf', 'mp4': 'video/mp4', 'txt': 'text/plain',
                     'webp': 'image/webp'}.get(ext, mime)
-        doc = _doc(doc_id, mime, len(file),
-                   [types.DocumentAttributeFilename(file_name=file_name or 'file')])
+        attrs = list(attributes or [])
+        if not any(isinstance(a, types.DocumentAttributeFilename) for a in attrs):
+            attrs.append(types.DocumentAttributeFilename(file_name=file_name or 'file'))
+        doc = _doc(doc_id, mime, len(file), attrs)
         PAYLOADS[doc_id] = bytes(file)
         m = _msg(nid, _peer_of(chat), text=caption or '', sender=ME, out=True,
                  media=types.MessageMediaDocument(document=doc),
@@ -511,7 +585,8 @@ class FakeTelegramClient:
         _finish_msg(m, self)
         return m
 
-    async def forward_messages(self, dest, messages, from_peer=None, **kw):
+    async def forward_messages(self, dest, messages, from_peer=None,
+                            drop_author=False, **kw):
         src = _chat_id_of(from_peer)
         dst = _chat_id_of(dest)
         ids = [messages] if isinstance(messages, int) else list(messages)
@@ -522,10 +597,12 @@ class FakeTelegramClient:
             m = MESSAGES.get((src, mid))
             if m is None:
                 continue
+            fwd_hdr = None
+            if not drop_author:
+                fwd_hdr = types.MessageFwdHeader(
+                    from_id=types.PeerUser(user_id=101), date=NOW)
             nm = _msg(nid + i, _peer_of(dst), text=m.message or '', sender=None,
-                      out=False, media=m.media,
-                      fwd_from=types.MessageFwdHeader(
-                          from_id=types.PeerUser(user_id=101), date=NOW))
+                      out=False, media=m.media, fwd_from=fwd_hdr)
             _add(dst, nm)
             _finish_msg(nm, self, {101: ALICE})
             out.append(nm)
@@ -569,6 +646,13 @@ class FakeTelegramClient:
                 raw.unread_count = 0
 
     # ---------------- downloads
+    async def get_entity(self, entity):
+        pid = _chat_id_of(entity)
+        e = ENTITIES.get(pid)
+        if e is None:
+            raise ValueError('Could not find any entity corresponding to "%s"' % (entity,))
+        return e
+
     async def download_media(self, message, file=None, thumb=None, **kw):
         if thumb is None:
             # full-size
@@ -703,6 +787,92 @@ class FakeTelegramClient:
                 if _peer_marked(raw.peer) == chat:
                     return SimpleNamespace(dialogs=[raw])
             raise ValueError('unknown peer')
+        if t == 'GetFullUserRequest':
+            uid = getattr(request.id, 'user_id', None) or _chat_id_of(request.id)
+            e = ENTITIES.get(uid)
+            if e is None:
+                raise ValueError('unknown user %s' % uid)
+            full = types.UserFull(id=uid, settings=types.PeerSettings(),
+                                  notify_settings=types.PeerNotifySettings(),
+                                  common_chats_count=USER_COMMON.get(uid, 0),
+                                  about=USER_BIO.get(uid))
+            return types.users.UserFull(full_user=full, chats=[], users=[e])
+        if t == 'GetFullChannelRequest':
+            cid = request.channel.channel_id
+            mk = get_peer_id(types.PeerChannel(channel_id=cid))
+            ch = ENTITIES.get(mk)
+            if ch is None:
+                raise ValueError('unknown channel %s' % cid)
+            full = types.ChannelFull(
+                id=cid, about=CHAT_BIO.get(mk, ''), read_inbox_max_id=0,
+                read_outbox_max_id=0, unread_count=0, chat_photo=types.PhotoEmpty(id=0),
+                notify_settings=types.PeerNotifySettings(), bot_info=[], pts=5,
+                can_view_participants=True,
+                participants_count=CHAT_MEMBERS.get(mk),
+                online_count=CHAT_ONLINE.get(mk))
+            return types.messages.ChatFull(full_chat=full, chats=[ch], users=[])
+        if t == 'GetFullChatRequest':
+            cid = request.chat_id
+            ch = ENTITIES.get(-cid)
+            if ch is None:
+                raise ValueError('unknown chat %s' % cid)
+            participants = types.ChatParticipants(chat_id=cid, participants=[
+                types.ChatParticipant(user_id=777, inviter_id=101, date=NOW),
+                types.ChatParticipant(user_id=101, inviter_id=777, date=NOW),
+                types.ChatParticipant(user_id=501, inviter_id=777, date=NOW),
+            ], version=1)
+            full = types.ChatFull(id=cid, about=CHAT_BIO.get(-cid, ''),
+                                  participants=participants,
+                                  notify_settings=types.PeerNotifySettings())
+            return types.messages.ChatFull(full_chat=full, chats=[ch], users=[ME, ALICE, BOB])
+        if t == 'GetBotCallbackAnswerRequest':
+            chat = _chat_id_of(request.peer)
+            m = MESSAGES.get((chat, request.msg_id))
+            if m is None:
+                raise tg_errors.MessageIdInvalidError(None)
+            if (request.data or b'') == b'ping':
+                return types.messages.BotCallbackAnswer(
+                    cache_time=0, alert=True, message='Pong! Button works.')
+            return types.messages.BotCallbackAnswer(
+                cache_time=0, alert=False, message='Unknown button pressed.')
+        if t == 'SearchGlobalRequest':
+            q = (request.q or '').lower()
+            chats, users, msgs = [], [], []
+            for mk, e in ENTITIES.items():
+                nm = display_title(e).lower()
+                un = (getattr(e, 'username', '') or '').lower()
+                if q and (q in nm or q in un):
+                    if isinstance(e, types.User):
+                        users.append(e)
+                    else:
+                        chats.append(e)
+            for (cid, mid), m in MESSAGES.items():
+                if q and q in (m.message or '').lower():
+                    msgs.append(m)
+            msgs.sort(key=lambda x: -x.id)
+            msgs = msgs[:request.limit]
+            for m in msgs:
+                mk = m.chat_id
+                e = ENTITIES.get(mk)
+                if e is None:
+                    continue
+                if isinstance(e, types.User):
+                    if e not in users:
+                        users.append(e)
+                elif e not in chats:
+                    chats.append(e)
+            for m in msgs:
+                _finish_msg(m, self)
+            return types.messages.MessagesSlice(count=len(msgs), messages=msgs,
+                                                topics=[], chats=chats, users=users)
+        if t == 'UpdateProfileRequest':
+            if request.first_name is not None:
+                ME.first_name = request.first_name
+            if request.last_name is not None:
+                ME.last_name = request.last_name
+            if request.about is not None:
+                USER_BIO[777] = request.about
+            return ME
         raise ValueError('fake client: unhandled request ' + t)
 
     def add_event_handler(self, callback, event=None):
