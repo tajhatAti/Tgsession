@@ -35,9 +35,19 @@ def _peer_of(chat_id):
 
 
 def _chat_id_of(x):
-    """anything (marked int, entity, input peer, peer) -> marked int."""
+    """anything (marked int, entity, input peer, peer, @username) -> marked int."""
     if isinstance(x, int):
         return x
+    if isinstance(x, str):
+        u = x.strip().lstrip('@').rsplit('/', 1)[-1].lower()
+        for e in ENTITIES.values():
+            if (getattr(e, 'username', None) or '').lower() == u:
+                if isinstance(e, types.User):
+                    return e.id
+                if isinstance(e, types.Chat):
+                    return get_peer_id(types.PeerChat(chat_id=e.id))
+                return get_peer_id(types.PeerChannel(channel_id=e.id))
+        return None
     for t, make in ((types.User, lambda e: types.PeerUser(user_id=e.id)),
                     (types.Chat, lambda e: types.PeerChat(chat_id=e.id)),
                     (types.Channel, lambda e: types.PeerChannel(channel_id=e.id)),
@@ -136,6 +146,20 @@ STICKER_DOC = _doc(9004, 'image/webp', 50_000, [
     types.DocumentAttributeImageSize(w=512, h=512)])
 PAYLOADS[9004] = _pattern(50_000)
 
+# night build 2: animated stickers (.tgs Lottie + .webm video)
+import gzip as _gzip
+TGS_DOC = _doc(9005, 'application/x-tgsticker', 20_000, [
+    types.DocumentAttributeSticker(alt='🎉', stickerset=types.InputStickerSetEmpty()),
+    types.DocumentAttributeImageSize(w=512, h=512)])
+PAYLOADS[9005] = _gzip.compress(b'{"v":"5.5.7","fr":60,"ip":0,"op":60,"w":512,"h":512,'
+                                 b'"layers":[{"ty":4,"ip":0,"op":60,"st":0,"shapes":[],'
+                                 b'"ks":{"o":{"a":0,"k":100},"r":{"a":1,"k":[{"t":0,"s":[0]},{"t":60,"s":[360]}]},'
+                                 b'"p":{"a":0,"k":[256,256]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]}}}]}]}')
+WEBM_DOC = _doc(9006, 'video/webm', 80_000, [
+    types.DocumentAttributeSticker(alt='💥', stickerset=types.InputStickerSetEmpty()),
+    types.DocumentAttributeVideo(duration=0, w=512, h=512)])
+PAYLOADS[9006] = _pattern(80_000)
+
 PHOTO = types.Photo(id=7001, access_hash=1, file_reference=b'x', date=NOW, dc_id=2,
                     sizes=[types.PhotoSize(type='m', w=800, h=600, size=50_000),
                            types.PhotoSize(type='x', w=1600, h=1200, size=180_000)])
@@ -157,6 +181,8 @@ CHAT_ONLINE = {ID_NEWS: 900, ID_SUPER: 7}
 # ---------------------------------------------------------------- messages
 GP = types.PeerChat(chat_id=201)
 MESSAGES = {}   # (chat_id, msg_id) -> Message
+SCHEDULED = {}  # chat_id -> [Message, ...]   (scheduled messages store)
+STORIES = {}    # chat_id -> {'items': [StoryItem...], 'max_read_id': int}
 
 
 def _msg(mid, chat_peer, text='', sender=None, out=False, media=None, entities=None,
@@ -256,6 +282,66 @@ _add(ID_GROUP, _msg(123, GP, '', sender=ALICE,
                     media=types.MessageMediaPhoto(photo=PHOTO)))
 MESSAGES[(ID_GROUP, 124)].grouped_id = 555001
 MESSAGES[(ID_GROUP, 123)].grouped_id = 555001
+MESSAGES[(ID_GROUP, 120)].pinned = True
+_add(ID_BOT, _msg(4, _peer_of(ID_BOT), '', sender=BOT,
+                  media=types.MessageMediaDocument(document=TGS_DOC)))
+_add(ID_BOT, _msg(5, _peer_of(ID_BOT), '', sender=BOT,
+                  media=types.MessageMediaDocument(document=WEBM_DOC)))
+
+# ---------------- stories (night build 2) ----------------
+PAYLOADS[7302] = _pattern(300_000)
+
+STORIES[ID_ALICE] = {
+    'items': [
+        types.StoryItem(id=1, date=NOW - timedelta(hours=3),
+                        expire_date=NOW + timedelta(hours=21),
+                        media=types.MessageMediaPhoto(photo=PHOTO), min=False),
+        types.StoryItem(id=2, date=NOW - timedelta(hours=1),
+                        expire_date=NOW + timedelta(hours=23),
+                        media=types.MessageMediaDocument(document=_doc(
+                            7302, 'video/mp4', 300000, [
+                                types.DocumentAttributeVideo(duration=8, w=640, h=640)])),
+                        min=False),
+    ],
+    'max_read_id': 0,
+}
+STORIES[ID_ME] = {
+    'items': [
+        types.StoryItem(id=1, date=NOW - timedelta(hours=5),
+                        expire_date=NOW + timedelta(hours=19),
+                        media=types.MessageMediaPhoto(photo=PHOTO2), min=False, out=True,
+                        views=types.StoryViews(views_count=42, reactions=[])),
+    ],
+    'max_read_id': 1,
+}
+# one expired story must be filtered out
+STORIES[ID_BOB] = {
+    'items': [types.StoryItem(id=1, date=NOW - timedelta(days=2),
+                              expire_date=NOW - timedelta(days=1),
+                              media=types.MessageMediaPhoto(photo=PHOTO), min=False)],
+    'max_read_id': 0,
+}
+
+# ---------------- scheduled messages seed ----------------
+_sched1 = _msg(90001, _peer_of(ID_ALICE), 'scheduled: happy birthday!',
+               sender=ME, out=True, date=datetime.now(timezone.utc) + timedelta(hours=6))
+SCHEDULED[ID_ALICE] = [_sched1]
+
+# ---------------- inline bot results ----------------
+def _inline_results(q):
+    q = (q or '').strip()
+    items = [
+        ('r1', 'Hello from @storebot!', 'Says hello to %s' % (q or 'you')),
+        ('r2', 'Result 2 for %s' % (q or 'empty query'), 'Second article result'),
+        ('r3', 'Photo result', 'A photo type result'),
+    ]
+    out = []
+    for rid, title, desc in items:
+        out.append(types.BotInlineResult(
+            id=rid, type='article', title=title, description=desc,
+            send_message=types.BotInlineMessageText(message=title)))
+    return out
+
 
 UP = types.PeerUser(user_id=101)
 _add(ID_ALICE, _msg(25, UP, 'hello from alice', sender=ALICE))
@@ -330,7 +416,8 @@ def _finish_msg(m, client, extra_entities=None):
         entities = dict(extra_entities or {})
         for uid in (getattr(getattr(m, 'from_id', None), 'user_id', None),
                     getattr(getattr(getattr(m, 'fwd_from', None),
-                                    'from_id', None), 'user_id', None)):
+                                    'from_id', None), 'user_id', None),
+                    getattr(m, 'via_bot_id', None)):
             if uid and uid in ENTITIES:
                 entities.setdefault(uid, ENTITIES[uid])
         m._finish_init(client, entities, None)
@@ -507,6 +594,13 @@ class FakeTelegramClient:
                 types.InputMessagesFilterUrl: ('__webpage__', '__url__'),
             }
             fkey = filter if isinstance(filter, type) else type(filter)
+            if fkey is types.InputMessagesFilterPinned:
+                msgs = [m for m in msgs if getattr(m, 'pinned', False)]
+                if limit is not None:
+                    msgs = msgs[:limit]
+                for m in msgs:
+                    _finish_msg(m, self)
+                return msgs
             wanted = kinds.get(fkey, ())
             def _kind_of(m):
                 from telethon.extensions import html as _h
@@ -549,10 +643,19 @@ class FakeTelegramClient:
         return not _re.search(r'<[^a-zA-Z/]', text)
 
     async def send_message(self, entity, text, reply_to=None, parse_mode=None,
-                           link_preview=None, **kw):
+                           link_preview=None, schedule_date=None, **kw):
         chat = _chat_id_of(entity)
         if parse_mode == 'html' and not self._html_ok(text):
             raise ValueError('Could not parse the given HTML text')
+        if schedule_date:
+            when = datetime.fromtimestamp(int(schedule_date), timezone.utc)
+            sched = SCHEDULED.setdefault(chat, [])
+            nid = 90000 + len(sched) + 1
+            m = _msg(nid, _peer_of(chat), text=text, sender=ME, out=True,
+                     reply_to=reply_to, date=when)
+            sched.append(m)
+            _finish_msg(m, self)
+            return m
         existing = chat_msgs(chat)
         nid = (existing[0].id + 1) if existing else 1
         m = _msg(nid, _peer_of(chat), text=text, sender=ME, out=True, reply_to=reply_to,
@@ -630,10 +733,16 @@ class FakeTelegramClient:
 
     async def pin_message(self, entity, message=None, notify=False, **kw):
         self._pinned.append((_chat_id_of(entity), message, True))
+        m = MESSAGES.get((_chat_id_of(entity), getattr(message, 'id', None)))
+        if m is not None:
+            m.pinned = True
         return True
 
     async def unpin_message(self, entity, message=None, **kw):
         self._pinned.append((_chat_id_of(entity), message, False))
+        m = MESSAGES.get((_chat_id_of(entity), getattr(message, 'id', None)))
+        if m is not None:
+            m.pinned = False
         return True
 
     async def send_read_acknowledge(self, entity, message=None, max_id=None,
@@ -653,7 +762,22 @@ class FakeTelegramClient:
             raise ValueError('Could not find any entity corresponding to "%s"' % (entity,))
         return e
 
+    async def upload_file(self, file, file_name=None, **kw):
+        data = file if isinstance(file, (bytes, bytearray)) else b'x'
+        return bytes(data[:64]) or b'x'
+
     async def download_media(self, message, file=None, thumb=None, **kw):
+        # night build 2: accept raw media / Document / Photo / StoryItem objects
+        obj = message
+        if isinstance(obj, types.Document):
+            return PAYLOADS.get(obj.id, b'')
+        if isinstance(obj, types.Photo):
+            return PNG_PHOTO
+        if not hasattr(obj, 'photo') and not hasattr(obj, 'document'):
+            med = getattr(obj, 'media', None)
+            if med is not None:
+                obj = med
+        message = obj
         if thumb is None:
             # full-size
             if getattr(message, 'photo', None) is not None:
@@ -722,6 +846,100 @@ class FakeTelegramClient:
     # ---------------- raw calls
     async def __call__(self, request):
         t = type(request).__name__
+        # ---------------- night build 2: stories / inline / scheduled / extras ----------------
+        if t == 'GetPeerStoriesRequest':
+            chat = _chat_id_of(request.peer)
+            st = STORIES.get(chat)
+            if st is None:
+                return types.stories.PeerStories(stories=[], chats=[], users=[])
+            ps = types.PeerStories(peer=_peer_of(chat), stories=list(st['items']),
+                                   max_read_id=st['max_read_id'])
+            ent = ENTITIES.get(chat)
+            return types.stories.PeerStories(stories=[ps], chats=[], users=[ent] if ent else [])
+        if t == 'GetAllStoriesRequest':
+            pss = []
+            for chat, st in STORIES.items():
+                if st['items'] and chat != ID_BOB:      # BOB's are expired -> filtered anyway
+                    pss.append(types.PeerStories(peer=_peer_of(chat), stories=list(st['items']),
+                                                 max_read_id=st['max_read_id']))
+            return types.stories.AllStories(count=len(pss), state='', peer_stories=pss,
+                                            chats=[], users=[], stealth_mode=None, has_more=False)
+        if t == 'ReadStoriesRequest':
+            chat = _chat_id_of(request.peer)
+            st = STORIES.get(chat)
+            if st is not None:
+                st['max_read_id'] = max(st['max_read_id'], int(request.max_id or 0))
+            return True
+        if t == 'DeleteStoriesRequest':
+            chat = _chat_id_of(request.peer)
+            st = STORIES.get(chat)
+            if st is not None:
+                ids = set(request.id or [])
+                st['items'] = [s for s in st['items'] if s.id not in ids]
+            return True
+        if t == 'SendStoryRequest':
+            st = STORIES.setdefault(ID_ME, {'items': [], 'max_read_id': 0})
+            nid = max([s.id for s in st['items']] or [0]) + 1
+            if isinstance(request.media, types.InputMediaUploadedPhoto):
+                media = types.MessageMediaPhoto(photo=PHOTO2)
+            else:
+                media = types.MessageMediaDocument(document=_doc(
+                    7400 + nid, 'video/mp4', 300000,
+                    [types.DocumentAttributeVideo(duration=8, w=640, h=640)]))
+            st['items'].append(types.StoryItem(
+                id=nid, date=datetime.now(timezone.utc),
+                expire_date=datetime.now(timezone.utc) + timedelta(hours=24),
+                media=media, min=False, out=True,
+                views=types.StoryViews(views_count=0, reactions=[])))
+            return True
+        if t == 'GetInlineBotResultsRequest':
+            bot = _chat_id_of(request.bot)
+            if bot != ID_BOT:
+                raise ValueError('not an inline bot')
+            q = request.query or ''
+            if q.strip() == 'fail':
+                raise tg_errors.BotResponseTimeoutError(None)
+            return types.messages.BotResults(
+                query_id=555001, results=_inline_results(q), cache_time=0, users=[],
+                gallery=False, next_offset='', switch_pm=None, switch_webview=None)
+        if t == 'SendInlineBotResultRequest':
+            chat = _chat_id_of(request.peer)
+            existing = chat_msgs(chat)
+            nid = (existing[0].id + 1) if existing else 1
+            m = _msg(nid, _peer_of(chat), text='Hello from @storebot!', sender=ME, out=True,
+                     date=datetime.now(timezone.utc))
+            m.via_bot_id = BOT.id
+            m._via_bot = BOT
+            _add(chat, m)
+            _finish_msg(m, self)
+            return True
+        if t == 'GetScheduledHistoryRequest':
+            chat = _chat_id_of(request.peer)
+            msgs = list(SCHEDULED.get(chat, []))
+            for m in msgs:
+                _finish_msg(m, self)
+            return types.messages.Messages(messages=msgs, chats=[], users=[], topics=[])
+        if t == 'GetScheduledMessagesRequest':
+            chat = _chat_id_of(request.peer)
+            ids = set(request.id or [])
+            msgs = [m for m in SCHEDULED.get(chat, []) if m.id in ids]
+            for m in msgs:
+                _finish_msg(m, self)
+            return types.messages.Messages(messages=msgs, chats=[], users=[], topics=[])
+        if t == 'DeleteScheduledMessagesRequest':
+            chat = _chat_id_of(request.peer)
+            ids = set(request.id or [])
+            SCHEDULED[chat] = [m for m in SCHEDULED.get(chat, []) if m.id not in ids]
+            return True
+        if t == 'UploadProfilePhotoRequest':
+            ME.photo = types.UserProfilePhoto(photo_id=7900, dc_id=2, has_video=False)
+            return types.photos.Photo(photo=PHOTO, users=[])
+        if t == 'ExportMessageLinkRequest':
+            return types.ExportedMessageLink(link='https://t.me/testgroup/%d' % request.id,
+                                             html='')
+        if t == 'JoinChannelRequest':
+            return True
+        # ---------------- end night build 2 ----------------
         if t == 'SetTypingRequest':
             self._sent_typing.append(request)
             return True

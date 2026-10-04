@@ -82,6 +82,16 @@ function openMsgMenu(m, x, y){
       catch (err) { toast('Could not copy'); }
     }});
     items.push({icon: 'i-forward', label: 'Forward', fn: function(){ openForwardPicker([m.id]); }});
+    items.push({icon: 'i-link', label: 'Copy link', fn: function(){
+      api('api/link', {method: 'POST', body: {chat_id: S.current, msg_id: m.id}})
+        .then(function(r){
+          if (r.link){
+            try { navigator.clipboard.writeText(r.link); toast('Link copied'); }
+            catch (err){ openModal('<h3>Message link</h3><p style="word-break:break-all"><a href="' + esc(r.link) + '" target="_blank" rel="noopener">' + esc(r.link) + '</a></p><button class="btn primary mclose">Close</button>'); }
+          } else { toast('No link available'); }
+        })
+        .catch(function(e){ toastErr(e); });
+    }});
     items.push({icon: 'i-pin', label: 'Pin message', fn: function(){ actPin(m, true); }});
     items.push({icon: 'i-pin', label: 'Unpin message', fn: function(){ actPin(m, false); }});
   }
@@ -96,6 +106,7 @@ $('#btnChatMenu').addEventListener('click', function(e){
   var d = S.dlg || {};
   openMenu([
     {icon: 'i-user', label: 'Chat info', fn: function(){ if (S.current != null) openProfile(S.current); }},
+    {icon: 'i-clock', label: 'Scheduled messages', fn: viewScheduled},
     {icon: d.muted ? 'i-bell' : 'i-bell-off', label: d.muted ? 'Unmute' : 'Mute', fn: toggleMute},
     {icon: d.archived ? 'i-unarchive' : 'i-archive', label: d.archived ? 'Unarchive' : 'Archive', fn: toggleArchive},
     {sep: true},

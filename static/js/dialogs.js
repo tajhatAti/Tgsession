@@ -147,3 +147,65 @@ $('#gsearch').addEventListener('mousedown', function(e){
 document.addEventListener('click', function(e){
   if (!e.target.closest('#gsearch') && !e.target.closest('#dlgSearch')) gsClose();
 });
+
+/* ============================== new chat / join by username ============================== */
+$('#btnNew').addEventListener('click', function(){
+  openModal('<div class="mhead"><b>New chat</b>' +
+    '<button class="icon-btn" id="ncClose"><svg class="ic"><use href="#i-close"/></svg></button></div>' +
+    '<div style="padding:12px">' +
+      '<p class="hint" style="margin:0 0 8px">Enter a @username or t.me link to open a chat or join a channel/group.</p>' +
+      '<input id="ncUser" placeholder="@username" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);outline:none">' +
+      '<div id="ncResult" style="margin-top:10px"></div>' +
+    '</div>');
+  $('#ncClose').onclick = closeModal;
+  setTimeout(function(){ $('#ncUser').focus(); }, 50);
+  $('#ncUser').addEventListener('keydown', function(e){
+    if (e.key === 'Enter'){ e.preventDefault(); ncResolve(this.value); }
+  });
+  var t = null;
+  $('#ncUser').addEventListener('input', function(){
+    clearTimeout(t);
+    var v = this.value.trim();
+    if (v.length < 3) return;
+    t = setTimeout(function(){ ncResolve(v); }, 500);
+  });
+});
+
+function ncResolve(name){
+  if (!name) return;
+  api('api/resolve?username=' + encodeURIComponent(name)).then(function(r){
+    var c = r.chat || {};
+    var box = $('#ncResult');
+    if (!box) return;
+    box.innerHTML = '<div class="rowitem" data-nc="' + c.id + '" data-join="' + (r.can_join ? '1' : '') + '">' +
+      avatarHTML(c.id, c.name, c.has_photo, 'small', colorFor(c.id)) +
+      '<div class="ri-body"><div class="ri-t">' + esc(c.name) + '</div>' +
+      '<div class="ri-s">' + esc((c.username ? '@' + c.username : c.type) +
+        (c.participants_count ? ' · ' + Number(c.participants_count).toLocaleString() + ' members' : '')) + '</div></div>' +
+      '<button class="btn primary" style="margin-left:auto">' + (r.can_join ? 'Join' : 'Open') + '</button></div>';
+    box.onclick = function(e){
+      var row = e.target.closest('[data-nc]');
+      if (!row) return;
+      var id = Number(row.dataset.nc);
+      if (row.dataset.join){
+        api('api/join', {method: 'POST', body: {username: c.username}})
+          .then(function(){ closeModal(); loadDialogs(true); setTimeout(function(){ openChat(id); }, 400); })
+          .catch(toastErr);
+      } else {
+        /* chat may not be in the dialog list yet — add a temporary entry */
+        if (!S.dialogById[id]){
+          var d = {id: id, type: c.type, name: c.name, username: c.username,
+                   has_photo: c.has_photo, verified: c.verified, unread: 0, mentions: 0,
+                   pinned: false, muted: false, archived: false, last: {}};
+          S.dialogs.unshift(d);
+          S.dialogById[id] = d;
+        }
+        closeModal();
+        openChat(id);
+      }
+    };
+  }).catch(function(e){
+    var box = $('#ncResult');
+    if (box) box.innerHTML = '<div class="empty-list">' + esc(e.detail || 'Not found') + '</div>';
+  });
+}

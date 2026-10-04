@@ -15,6 +15,7 @@ from .config import STATIC_DIR, log
 from .routes import auth as routes_auth
 from .routes import chat as routes_chat
 from .routes import media as routes_media
+from .routes import extras as routes_extras
 from .tgstate import state
 
 
@@ -96,6 +97,7 @@ app.include_router(routes_auth.public)
 app.include_router(routes_auth.router)
 app.include_router(routes_chat.router)
 app.include_router(routes_media.router)
+app.include_router(routes_extras.router)
 
 # static frontend at the root: / -> index.html, /css/* /js/* /icons/* ...
 app.mount("/", AppStaticFiles(directory=STATIC_DIR, html=True), name="static")

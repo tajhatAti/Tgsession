@@ -53,6 +53,7 @@ function openChat(id){
   $('#msgs').innerHTML = '<div class="spinner"></div>';
   var kb0 = document.getElementById('botKb');
   if (kb0){ kb0.hidden = true; kb0.innerHTML = ''; }
+  updatePinBar(null);
   updateChatHeader();
   renderDialogs();
   startPolling();
@@ -73,6 +74,7 @@ function openChat(id){
     setTyping(r.typing || []);
     updateFab();
     updateBotKb();
+    updatePinBar(r.pinned);
     restoreDraft(chatId);
     if (window.matchMedia('(min-width:900px)').matches) $('#input').focus();
   }).catch(function(e){
@@ -146,6 +148,15 @@ function mediaHTML(m){
       '<audio controls preload="none" src="' + u + '?kind=file"></audio></div>';
   }
   if (k === 'sticker'){
+    var mime = mi.mime || '';
+    if (mime === 'application/x-tgsticker'){
+      /* animated Lottie sticker (.tgs = gzipped Lottie JSON) */
+      return '<div class="sticker lottie" data-src="' + u + '?kind=sticker" data-alt="' + esc(mi.alt || '🙂') + '"></div>';
+    }
+    if (mime === 'video/webm'){
+      /* video sticker */
+      return '<div class="sticker"><video class="stk-vid" src="' + u + '?kind=sticker" autoplay loop muted playsinline></video></div>';
+    }
     return '<div class="sticker"><img loading="lazy" src="' + u + '?kind=thumb" alt="" data-alt="' + esc(mi.alt || '🙂') + '" onerror="this.onerror=null;this.parentNode.textContent=this.getAttribute(&quot;data-alt&quot;)"></div>';
   }
   if (k === 'file' || k === 'picfile'){
@@ -207,6 +218,7 @@ function messageHTML(m, prev){
   var cls = ['msg', out ? 'out' : 'in'];
   if (isFirstOfGroup(m, prev)) cls.push('first');
   var inner = '';
+  if (m.via_bot) inner += '<div class="viabot">via ' + esc(m.via_bot) + '</div>';
   if (m.forward_from) inner += '<div class="fwd">Forwarded from ' + esc(m.forward_from) + '</div>';
   var inGroup = S.dlg && (S.dlg.type === 'group');
   if (!out && inGroup && m.sender && m.sender.name){
@@ -238,6 +250,7 @@ function albumHTML(group, prev){
   var cls = ['msg', out ? 'out' : 'in'];
   if (isFirstOfGroup(m, prev)) cls.push('first');
   var inner = '';
+  if (m.via_bot) inner += '<div class="viabot">via ' + esc(m.via_bot) + '</div>';
   if (m.forward_from) inner += '<div class="fwd">Forwarded from ' + esc(m.forward_from) + '</div>';
   var inGroup = S.dlg && (S.dlg.type === 'group');
   if (!out && inGroup && m.sender && m.sender.name){
@@ -300,6 +313,7 @@ function buildListHTML(){
 }
 function renderAllMessages(){
   $('#msgs').innerHTML = buildListHTML();
+  initLottieStickers($('#msgs'));
 }
 function appendNodes(list){
   if (!list.length) return;
@@ -327,6 +341,7 @@ function appendNodes(list){
     }
   }
   box.insertAdjacentHTML('beforeend', html);
+  initLottieStickers(box);
 }
 function replaceMessage(m){
   if (!m || S.msgById[m.id] === undefined) return;
@@ -337,7 +352,10 @@ function replaceMessage(m){
   S.msgById[m.id] = m;
   var prev = i > 0 ? S.msgs[i - 1] : null;
   var node = $('#msgs .msg[data-id="' + m.id + '"]');
-  if (node) node.outerHTML = messageHTML(m, prev);
+  if (node){
+    node.outerHTML = messageHTML(m, prev);
+    initLottieStickers($('#msgs'));
+  }
 }
 function removeMessages(ids){
   var idset = {};
@@ -432,6 +450,7 @@ function pollMessages(){
     if (typeof r.read_inbox_max_id === 'number') S.readIn = Math.max(S.readIn || 0, r.read_inbox_max_id);
     var fresh = (r.messages || []).filter(function(x){ return S.msgById[x.id] === undefined; }).reverse();
     if (fresh.length){
+      if (!fresh[fresh.length - 1].out) playSound('recv');
       var nearBottom = isNearBottom();
       fresh.forEach(function(m){ S.msgs.push(m); S.msgById[m.id] = m; });
       S.newest = Math.max.apply(null, [S.newest].concat(fresh.map(function(x){ return x.id; })));
@@ -556,4 +575,90 @@ $('#msgs').addEventListener('click', function(e){
     }).catch(function(err){ toastErr(err); })
       .finally(function(){ el.disabled = false; el.classList.remove('busy'); });
   }
+});
+
+
+/* ============================== animated stickers (Lottie .tgs) ============================== */
+var lottieDataCache = {};
+function initLottieStickers(root){
+  if (!root || typeof lottie === 'undefined') return;
+  $$('.sticker.lottie[data-src]', root.parentNode ? root : document).forEach(function(el){
+    if (el.dataset.lottie === '1') return;
+    var url = el.dataset.src;
+    el.dataset.lottie = '1';
+    var draw = function(data){
+      try {
+        lottie.loadAnimation({
+          container: el, renderer: 'svg', loop: true, autoplay: true, animationData: data
+        });
+      } catch (e){ el.textContent = el.dataset.alt || '🙂'; }
+    };
+    if (lottieDataCache[url]){ draw(lottieDataCache[url]); return; }
+    fetch(url).then(function(r){
+      if (!r.ok) throw new Error(r.status);
+      return r.arrayBuffer();
+    }).then(function(buf){
+      if (typeof DecompressionStream === 'function' && buf.length > 2 &&
+          buf[0] === 0x1f && buf[1] === 0x8b){
+        return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
+      }
+      return JSON.parse(new TextDecoder().decode(buf));
+    }).then(function(data){
+      lottieDataCache[url] = data;
+      draw(data);
+    }).catch(function(){
+      el.dataset.lottie = '';
+      el.textContent = el.dataset.alt || '🙂';
+    });
+  });
+}
+
+/* ============================== pinned message bar ============================== */
+function updatePinBar(p){
+  var bar = $('#pinBar');
+  if (!bar) return;
+  S.pinned = p || null;
+  bar.hidden = !p;
+  if (p){
+    $('#pinText').textContent = p.raw || 'Pinned message';
+  }
+}
+$('#pinClose').addEventListener('click', function(){
+  api('api/pin', {method: 'POST', body: {chat_id: S.current, msg_id: null, pinned: false}})
+    .then(function(){ updatePinBar(null); toast('Unpinned'); })
+    .catch(toastErr);
+});
+$('#pinBar').addEventListener('click', function(e){
+  if (e.target.closest('#pinClose')) return;
+  if (S.pinned && S.pinned.id) jumpTo(S.pinned.id);
+});
+
+/* ============================== double-tap to ❤️ react ============================== */
+var lastTap = {t: 0, id: 0};
+$('#msgs').addEventListener('click', function(e){
+  var row = e.target.closest('.msg');
+  if (!row || !row.dataset.id) return;
+  var id = Number(row.dataset.id);
+  var now = Date.now();
+  if (lastTap.id === id && now - lastTap.t < 350){
+    lastTap = {t: 0, id: 0};
+    var m = S.msgById[id];
+    if (m && !m.service){
+      var mine = false;
+      if (m.reactions){
+        m.reactions.forEach(function(r){ if (r.emoji === '❤️' && r.mine) mine = true; });
+      }
+      actReact(m, '❤️', mine);
+      var h = row.querySelector('.bub');
+      if (h){
+        var fx = document.createElement('span');
+        fx.className = 'heartpop';
+        fx.textContent = '❤️';
+        h.appendChild(fx);
+        setTimeout(function(){ fx.remove(); }, 800);
+      }
+    }
+    return;
+  }
+  lastTap = {t: now, id: id};
 });

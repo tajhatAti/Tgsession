@@ -550,6 +550,160 @@ check('P: icon at root', code == 200 and raw[:4] == b'\x89PNG', code)
 code, hdrs, raw = req('GET', '/live/myslug/healthz')
 check('P: healthz under prefix', code == 200 and b'ok' in raw, (code, raw[:40]))
 
+# ==========================================================================
+print('--- phase E: stories / inline bots / scheduled / extras (night build 2)')
+# ==========================================================================
+# ---- stories bar
+code, hdrs, data = jreq('GET', '/api/stories')
+peers = (data or {}).get('peers') or []
+me_st = (data or {}).get('me') or {}
+check('E: stories bar -> alice 2 stories unseen, bob expired filtered',
+      code == 200 and any(p['chat_id'] == fake.ID_ALICE and len(p['stories']) == 2
+                          and p['unseen'] == 2 for p in peers)
+      and not any(p['chat_id'] == fake.ID_BOB for p in peers), (code, peers))
+check('E: own story present with views',
+      me_st.get('chat_id') == fake.ID_ME and len(me_st.get('stories') or []) == 1
+      and me_st['stories'][0]['views'] == 42, me_st)
+alice_story = next((p for p in peers if p['chat_id'] == fake.ID_ALICE), {})
+sid = alice_story['stories'][0]['id'] if alice_story else 0
+
+code, hdrs, raw = req('GET', '/api/story_media/%d/%d?kind=thumb' % (fake.ID_ALICE, sid))
+check('E: story thumb image', code == 200 and raw[:4] == b'\x89PNG', (code, raw[:8]))
+code, hdrs, raw = req('GET', '/api/story_media/%d/%d?kind=full' % (fake.ID_ALICE, sid))
+check('E: story full media', code == 200 and len(raw) > 100, (code, len(raw)))
+vid_sid = alice_story['stories'][1]['id'] if alice_story else 0
+code, hdrs, raw = req('GET', '/api/story_media/%d/%d?kind=full' % (fake.ID_ALICE, vid_sid))
+check('E: video story full media', code == 200 and len(raw) > 100, (code, len(raw)))
+code, hdrs, raw = req('GET', '/api/story_media/%d/999?kind=thumb' % fake.ID_ALICE)
+check('E: unknown story -> 404', code == 404, code)
+
+# read stories
+code, hdrs, data = jreq('POST', '/api/stories/read',
+                        {'chat_id': fake.ID_ALICE, 'max_id': sid})
+check('E: mark stories read -> ok', code == 200 and (data or {}).get('ok'), (code, data))
+code, hdrs, data = jreq('GET', '/api/stories')
+alice_after = next((p for p in ((data or {}).get('peers') or [])
+                    if p['chat_id'] == fake.ID_ALICE), {})
+check('E: read state -> unseen drops', alice_after.get('unseen') == 1
+      and alice_after.get('max_read_id') == sid, alice_after)
+
+# post a story (photo)
+png = open('/tmp/tgw_story.png', 'wb')
+png.write(fake.PNG_PHOTO)
+png.close()
+with open('/tmp/tgw_story.png', 'rb') as f:
+    b = b'--XX\r\nContent-Disposition: form-data; name="file"; filename="story.png"\r\n' \
+        b'Content-Type: image/png\r\n\r\n' + f.read() + b'\r\n' \
+        b'--XX\r\nContent-Disposition: form-data; name="caption"\r\n\r\nnight build test\r\n--XX--\r\n'
+code, hdrs, raw = req('POST', '/api/stories/upload', b,
+                      headers={'Content-Type': 'multipart/form-data; boundary=XX'})
+data = json.loads(raw) if raw else {}
+check('E: post photo story -> ok', code == 200 and data.get('ok'), (code, data))
+code, hdrs, data = jreq('GET', '/api/stories')
+check('E: own stories grew to 2', len(((data or {}).get('me') or {}).get('stories') or []) == 2,
+      (data or {}).get('me'))
+new_sid = ((data or {}).get('me') or {}).get('stories', [{}])[-1].get('id')
+
+# delete own story
+code, hdrs, data = jreq('POST', '/api/stories/delete',
+                        {'chat_id': fake.ID_ME, 'story_id': new_sid})
+check('E: delete own story -> ok', code == 200 and (data or {}).get('ok'), (code, data))
+code, hdrs, data = jreq('GET', '/api/stories')
+check('E: own stories back to 1', len(((data or {}).get('me') or {}).get('stories') or []) == 1,
+      (data or {}).get('me'))
+
+# ---- inline bots
+code, hdrs, data = jreq('GET', '/api/inline_query?chat_id=%d&bot=storebot&q=hello' % fake.ID_ALICE)
+results = (data or {}).get('results') or []
+check('E: inline query -> 3 results with token',
+      code == 200 and len(results) == 3 and (data or {}).get('token')
+      and results[0]['title'] == 'Hello from @storebot!', (code, data))
+token = (data or {}).get('token') or ''
+code, hdrs, raw = req('GET', '/api/inline_media/%s/0' % token)
+check('E: inline media -> 404 for article (no thumb)', code == 404, code)
+code, hdrs, data = jreq('GET', '/api/inline_query?chat_id=%d&bot=storebot&q=fail' % fake.ID_ALICE)
+check('E: inline bot error -> 400 detail', code == 400 and 'detail' in (data or {}), (code, data))
+code, hdrs, data = jreq('GET', '/api/inline_query?chat_id=%d&bot=nosuchbot99&q=x' % fake.ID_ALICE)
+check('E: unknown bot -> 404', code == 404, code)
+
+# re-query then send result
+code, hdrs, data = jreq('GET', '/api/inline_query?chat_id=%d&bot=@storebot&q=hi' % fake.ID_ALICE)
+token = (data or {}).get('token') or ''
+rid = ((data or {}).get('results') or [{}])[0].get('id')
+code, hdrs, data = jreq('POST', '/api/send_inline',
+                        {'chat_id': fake.ID_ALICE, 'token': token, 'result_id': rid})
+check('E: send inline result -> ok', code == 200 and (data or {}).get('ok'), (code, data))
+code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&limit=3' % fake.ID_ALICE)
+last = ((data or {}).get('messages') or [{}])[0]
+check('E: sent message has via_bot @storebot', last.get('via_bot') == '@storebot',
+      last.get('via_bot'))
+code, hdrs, data = jreq('POST', '/api/send_inline',
+                        {'chat_id': fake.ID_ALICE, 'token': 'expired', 'result_id': 'r1'})
+check('E: expired inline token -> 400', code == 400, code)
+
+# ---- scheduled messages
+when = int(time.time()) + 3600
+code, hdrs, data = jreq('POST', '/api/schedule',
+                        {'chat_id': fake.ID_ALICE, 'text': 'scheduled via api', 'schedule_date': when})
+check('E: schedule message -> ok', code == 200 and (data or {}).get('ok'), (code, data))
+code, hdrs, data = jreq('GET', '/api/scheduled?chat_id=%d' % fake.ID_ALICE)
+sched = (data or {}).get('messages') or []
+check('E: scheduled list -> 2 items, all flagged',
+      len(sched) == 2 and all(m.get('scheduled') for m in sched)
+      and any(m.get('raw') == 'scheduled via api' for m in sched), (code, sched))
+new_sched_id = next(m['id'] for m in sched if m['raw'] == 'scheduled via api')
+code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&limit=50' % fake.ID_ALICE)
+check('E: scheduled NOT in live history',
+      not any(m.get('raw') == 'scheduled via api' for m in (data or {}).get('messages') or []))
+code, hdrs, data = jreq('POST', '/api/scheduled/delete',
+                        {'chat_id': fake.ID_ALICE, 'msg_id': new_sched_id})
+check('E: delete scheduled -> ok', code == 200, (code, data))
+code, hdrs, data = jreq('GET', '/api/scheduled?chat_id=%d' % fake.ID_ALICE)
+check('E: scheduled list back to 1', len((data or {}).get('messages') or []) == 1, data)
+code, hdrs, data = jreq('POST', '/api/schedule',
+                        {'chat_id': fake.ID_ALICE, 'text': 'x', 'schedule_date': 0})
+check('E: schedule bad ts -> 400', code == 400, code)
+
+# ---- pinned message info in /api/messages
+code, hdrs, data = jreq('GET', '/api/messages?chat_id=%d&limit=5' % fake.ID_GROUP)
+pinned = (data or {}).get('pinned')
+check('E: pinned info returned for group', pinned and pinned.get('id') == 120, pinned)
+
+# ---- profile photo upload
+with open('/tmp/tgw_story.png', 'rb') as f:
+    b = b'--XX\r\nContent-Disposition: form-data; name="file"; filename="me.png"\r\n' \
+        b'Content-Type: image/png\r\n\r\n' + f.read() + b'\r\n--XX--\r\n'
+code, hdrs, raw = req('POST', '/api/tg/me/photo', b,
+                      headers={'Content-Type': 'multipart/form-data; boundary=XX'})
+data = json.loads(raw) if raw else {}
+check('E: upload profile photo -> ok', code == 200 and data.get('ok'), (code, data))
+code, hdrs, raw = req('GET', '/api/avatar/%d' % fake.ID_ME)
+check('E: my avatar serves after upload', code == 200 and raw[:4] == b'\x89PNG', code)
+
+# ---- message link
+code, hdrs, data = jreq('POST', '/api/link', {'chat_id': fake.ID_GROUP, 'msg_id': 120})
+check('E: export message link (group)', code == 200
+      and (data or {}).get('link', '').startswith('https://t.me/'), (code, data))
+code, hdrs, data = jreq('POST', '/api/link', {'chat_id': fake.ID_BOB, 'msg_id': 22})
+check('E: user chat -> username-based link', code == 200
+      and (data or {}).get('link') == 'https://t.me/bob/22', (code, data))
+
+# ---- resolve + join
+code, hdrs, data = jreq('GET', '/api/resolve?username=alice')
+chat = (data or {}).get('chat') or {}
+check('E: resolve @alice', code == 200 and chat.get('id') == fake.ID_ALICE
+      and chat.get('username') == 'alice' and (data or {}).get('can_join') is False, (code, data))
+code, hdrs, data = jreq('GET', '/api/resolve?username=news_ch')
+chat = (data or {}).get('chat') or {}
+check('E: resolve @news_ch -> channel joinable', code == 200 and chat.get('type') == 'channel'
+      and (data or {}).get('can_join') is True, (code, data))
+code, hdrs, data = jreq('GET', '/api/resolve?username=ghost_user_xyz')
+check('E: resolve unknown -> 404', code == 404, code)
+code, hdrs, data = jreq('POST', '/api/join', {'username': 'news_ch'})
+check('E: join channel -> ok', code == 200 and (data or {}).get('ok'), (code, data))
+code, hdrs, data = jreq('POST', '/api/join', {'username': 'nosuchchannel999'})
+check('E: join unknown -> 400', code == 400, code)
+
 stop_server(server, thread)
 
 # ==========================================================================

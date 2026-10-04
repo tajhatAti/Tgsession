@@ -392,6 +392,14 @@ def message_to_json(m, chat_id: Optional[int] = None) -> Optional[dict]:
         except Exception:
             fwd = None
         is_service = getattr(m, "action", None) is not None
+        via = None
+        try:
+            vb = getattr(m, "via_bot", None)
+            if vb is not None:
+                via = getattr(vb, "username", None) or getattr(vb, "id", None)
+                via = ("@" + str(via)) if isinstance(via, str) else str(via)
+        except Exception:
+            via = None
         return {
             "id": mid,
             "chat_id": chat_id,
@@ -408,6 +416,7 @@ def message_to_json(m, chat_id: Optional[int] = None) -> Optional[dict]:
             "edited": bool(getattr(m, "edit_date", None)),
             "views": getattr(m, "views", None),
             "forward_from": fwd,
+            "via_bot": via,
             "buttons": buttons_json(m),
             "keyboard": keyboard_json(m),
             "grouped_id": getattr(m, "grouped_id", None),
@@ -417,7 +426,8 @@ def message_to_json(m, chat_id: Optional[int] = None) -> Optional[dict]:
         return {"id": mid, "chat_id": chat_id, "date": None, "out": False, "sender": None,
                 "html": "", "raw": "", "service": True, "reply_to": None, "media": None,
                 "webpage": None, "reactions": None, "edited": False, "views": None,
-                "forward_from": None, "buttons": None, "keyboard": None, "grouped_id": None, "error": True}
+                "forward_from": None, "via_bot": None, "buttons": None, "keyboard": None,
+                "grouped_id": None, "error": True}
 
 
 def reply_info(m, local: Dict[int, Any], fetched: Dict[int, Any]) -> Optional[dict]:

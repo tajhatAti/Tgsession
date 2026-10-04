@@ -101,7 +101,7 @@ function renderSettings(p, st){
   openModal(
     '<div class="mhead"><b>Settings</b>' +
       '<button class="icon-btn" id="stClose"><svg class="ic"><use href="#i-close"/></svg></button></div>' +
-    '<div class="profile-head"><div class="pava">' + avatarHTML(me.id, me.name, p.has_photo) + '</div>' +
+    '<div class="profile-head"><div class="pava pava-edit" id="stAva" title="Change photo">' + avatarHTML(me.id, me.name, p.has_photo) + '<span class="pava-plus">📷</span></div>' +
       '<div class="pname">' + esc(me.name || '') + '</div>' +
       '<div class="pstatus">' + esc(p.status || '') + '</div></div>' +
     '<div class="stform">' +
@@ -111,13 +111,35 @@ function renderSettings(p, st){
       '<button class="btn primary" id="stSave">Save profile</button>' +
     '</div>' +
     '<div class="prows">' + rows + '</div>' +
+    '<div class="stform"><label>Chat wallpaper<div class="wpicks" id="stWp">' +
+      [['doodles','Pattern'],['plain','Plain'],['blue','Blue'],['peach','Peach'],['mint','Mint']].map(function(w){
+        return '<button type="button" class="wpick' + (wpNow() === w[0] ? ' on' : '') + '" data-wp="' + w[0] + '">' + w[1] + '</button>';
+      }).join('') + '</div></label></div>' +
     '<div class="pacts">' +
       '<button class="btn" id="stTheme">' + (dark ? '☀️ Light theme' : '🌙 Dark theme') + '</button>' +
+      '<button class="btn" id="stSound">' + (soundOn() ? '🔔 Sounds: on' : '🔕 Sounds: off') + '</button>' +
       '<button class="btn" id="stLock">🔒 Lock site</button>' +
       '<button class="btn danger" id="stLogout">Log out Telegram</button>' +
     '</div>', false);
   $('#stClose').onclick = closeModal;
   $('#stTheme').onclick = toggleTheme;
+  $('#stSound').onclick = function(){
+    try {
+      var cur = localStorage.getItem('tgw_sound') !== '0';
+      localStorage.setItem('tgw_sound', cur ? '0' : '1');
+      if (!cur) playSound('send');
+      this.textContent = cur ? '🔕 Sounds: off' : '🔔 Sounds: on';
+    } catch (e) {}
+  };
+  $('#stAva').onclick = stPickPhoto;
+  var wpBox = $('#stWp');
+  if (wpBox) wpBox.onclick = function(e){
+    var b = e.target.closest('[data-wp]');
+    if (!b) return;
+    try { localStorage.setItem('tgw_wp', b.dataset.wp); } catch (err) {}
+    applyWallpaper();
+    $$('.wpick', wpBox).forEach(function(x){ x.classList.toggle('on', x === b); });
+  };
   $('#stLock').onclick = lockSite;
   $('#stLogout').onclick = doLogout;
   $('#stSave').onclick = function(){
@@ -145,3 +167,40 @@ function lastNameOf(name){
   parts.shift();
   return parts.join(' ');
 }
+
+
+/* ============================== change own photo ============================== */
+var stPhotoInput = null;
+function stPickPhoto(){
+  if (!stPhotoInput){
+    stPhotoInput = document.createElement('input');
+    stPhotoInput.type = 'file';
+    stPhotoInput.accept = 'image/*';
+    stPhotoInput.hidden = true;
+    document.body.appendChild(stPhotoInput);
+    stPhotoInput.addEventListener('change', function(){
+      var f = this.files && this.files[0];
+      this.value = '';
+      if (!f) return;
+      var fd = new FormData();
+      fd.append('file', f, f.name || 'photo.png');
+      toast('Uploading photo…');
+      api('api/tg/me/photo', {method: 'POST', form: fd}).then(function(){
+        toast('Photo updated');
+        openSettings();
+      }).catch(toastErr);
+    });
+  }
+  stPhotoInput.click();
+}
+function soundOn(){
+  try { return localStorage.getItem('tgw_sound') !== '0'; } catch (e) { return true; }
+}
+
+function wpNow(){
+  try { return localStorage.getItem('tgw_wp') || 'doodles'; } catch (e) { return 'doodles'; }
+}
+function applyWallpaper(){
+  document.body.setAttribute('data-wp', wpNow());
+}
+applyWallpaper();

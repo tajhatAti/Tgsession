@@ -59,4 +59,13 @@ async def api_media(chat_id: int, msg_id: int, kind: str = "thumb", dl: int = 0,
         return _bytes_response((data, mime), "private, max-age=604800")
     if kind == "file":
         return await stream_media(request, client, m, chat_id, bool(dl))
+    if kind == "sticker":
+        doc = getattr(m, "document", None)
+        if not isinstance(doc, types.Document):
+            raise HTTPException(404, "Not a sticker")
+        data = await client.download_media(m, file=bytes)
+        if not data:
+            raise HTTPException(404, "Could not load sticker")
+        mime = getattr(doc, "mime_type", None) or "application/octet-stream"
+        return _bytes_response((bytes(data), mime), "private, max-age=1209600")
     raise HTTPException(400, "Unknown kind")
