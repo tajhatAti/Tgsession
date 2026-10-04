@@ -1,0 +1,62 @@
+/* TgWeb — base.css (theme variables, reset, auth/login screens, buttons) */
+[hidden]{display:none!important}
+:root{
+  --bg:#f3f4f6;--panel:#ffffff;--hover:#f0f2f5;--active:#e7ebf0;--border:#e4e7eb;
+  --fg:#111827;--muted:#6b7280;--accent:#3390ec;--accent-soft:rgba(51,144,236,.12);
+  --accent-fg:#ffffff;--danger:#e53935;--badge:#3390ec;--badge-muted:#9aa2ac;
+  --chat-bg:#dbe3ec;--chat-dot:#c6d2df;--bub-in:#ffffff;--bub-in-border:#e7e9ee;
+  --bub-out:#effdde;--bub-out-fg:#111827;--meta:#9aa2ac;--meta-out:#56a04e;
+  --svc:rgba(0,0,0,.28);--link:#2b7fd4;--code-bg:rgba(0,0,0,.06);--shadow:0 4px 24px rgba(0,0,0,.14);
+  --scroll:rgba(0,0,0,.22);
+}
+html[data-theme="dark"]{
+  --bg:#181818;--panel:#212121;--hover:#2a2a2a;--active:#303030;--border:#2f2f2f;
+  --fg:#f1f1f1;--muted:#9e9e9e;--accent:#4aa3df;--accent-soft:rgba(74,163,223,.16);
+  --accent-fg:#ffffff;--danger:#ef5350;--badge:#4aa3df;--badge-muted:#6b6b6b;
+  --chat-bg:#141414;--chat-dot:#1e1e1e;--bub-in:#212121;--bub-in-border:#2f2f2f;
+  --bub-out:#766ac8;--bub-out-fg:#ffffff;--meta:#8b8b8b;--meta-out:rgba(255,255,255,.65);
+  --svc:rgba(0,0,0,.4);--link:#6cb9f0;--code-bg:rgba(255,255,255,.08);--shadow:0 4px 24px rgba(0,0,0,.5);
+  --scroll:rgba(255,255,255,.22);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+input,textarea{font:inherit;color:inherit}
+a{color:var(--link)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
+.ic{width:20px;height:20px;fill:currentColor;flex:none;display:block}
+.ic.big{width:26px;height:26px}
+.muted{color:var(--muted)}
+
+/* ---------- auth screens ---------- */
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:40}
+.auth-card{width:min(400px,92vw);background:var(--panel);border:1px solid var(--border);
+  border-radius:16px;padding:28px 24px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.auth-card .logo{width:64px;height:64px;border-radius:50%;background:var(--accent);display:grid;place-items:center;margin:0 auto;color:#fff}
+.auth-card h1{margin:0;font-size:20px;text-align:center}
+.auth-card p{margin:0;font-size:13px;color:var(--muted);text-align:center}
+.auth-card input,.auth-card textarea{width:100%;padding:11px 14px;border-radius:10px;
+  border:1px solid var(--border);background:var(--bg);outline:none}
+.auth-card input:focus,.auth-card textarea:focus{border-color:var(--accent)}
+.auth-card textarea{resize:vertical;min-height:90px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.btn{padding:10px 16px;border-radius:10px;background:var(--hover);text-align:center;font-weight:600}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}
+.btn.danger{background:var(--danger);color:#fff}
+.btn:disabled{opacity:.55;cursor:default}
+.err{background:rgba(229,57,53,.12);color:var(--danger);border-radius:8px;padding:9px 12px;font-size:13px;white-space:pre-wrap}
+.hint{font-size:12px;color:var(--muted);line-height:1.5;text-align:left}
+.tabs2{display:flex;gap:6px;background:var(--bg);border-radius:10px;padding:4px}
+.tabs2 button{flex:1;padding:8px;border-radius:8px;color:var(--muted);font-weight:600;font-size:14px}
+.tabs2 button.on{background:var(--accent);color:var(--accent-fg)}
+
+/* ---------- session-login extras ---------- */
+.auth-card details{width:100%;text-align:left;font-size:13px;color:var(--muted)}
+.auth-card summary{cursor:pointer;padding:6px 0;user-select:none}
+.auth-card summary:hover{color:var(--fg)}
+.auth-card pre.code{background:var(--bg);border:1px solid var(--border);border-radius:8px;
+  padding:10px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre;
+  font-family:ui-monospace,Menlo,Consolas,monospace;margin:6px 0}

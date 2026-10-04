@@ -1,0 +1,14 @@
+/* TgWeb — composer.css (message composer: reply/edit bars, input) */
+/* ---------- composer ---------- */
+#replyBar,#attachBar,#editBar{display:flex;gap:10px;align-items:center;background:var(--panel);
+  border-top:1px solid var(--border);padding:6px 12px;font-size:13.5px}
+#replyBar .rb,#editBar .rb{border-left:3px solid var(--accent);padding-left:8px;min-width:0;flex:1}
+#replyBar b,#editBar b{color:var(--accent);display:block;font-size:13px}
+#replyBar span,#editBar span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+#composer{display:flex;gap:8px;align-items:flex-end;background:var(--panel);border-top:1px solid var(--border);padding:8px 10px;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#input{flex:1;min-width:0;resize:none;border:0;outline:none;background:var(--bg);border-radius:18px;
+  padding:10px 14px;max-height:132px;line-height:1.4}
+#btnSend{width:42px;height:42px;border-radius:50%;background:var(--accent);color:var(--accent-fg);
+  display:grid;place-items:center;flex:none}
+#btnSend:disabled{opacity:.5}
+#btnAttach{color:var(--muted)}
